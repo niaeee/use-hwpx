@@ -334,6 +334,22 @@ def build(
         if replace_title:
             replace_drawtext_title(section_file, replace_title)
 
+        # 4-2. Remove stale linesegarray layout cache
+        # linesegarray contains character-position layout data that becomes
+        # invalid when text length changes (e.g. after --replace).
+        # Hangul recalculates these on open, so removing them is safe.
+        if replacements or replace_title:
+            raw = section_file.read_text(encoding="utf-8")
+            cleaned = re.sub(
+                r'\s*<hp:linesegarray>.*?</hp:linesegarray>',
+                '',
+                raw,
+                flags=re.DOTALL,
+            )
+            if len(cleaned) != len(raw):
+                section_file.write_text(cleaned, encoding="utf-8")
+                print("  Removed stale linesegarray blocks", file=sys.stderr)
+
         # 5. Update metadata
         update_metadata(work / "Contents" / "content.hpf", title, creator)
 

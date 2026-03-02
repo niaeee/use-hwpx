@@ -190,16 +190,44 @@ def make_note_paragraph(
     )
 
 
+def _is_inside_table(content: str, pos: int) -> bool:
+    """Check if position is inside a <hp:tbl>...</hp:tbl> block.
+
+    Counts <hp:tbl and </hp:tbl> tags before the position.
+    If open > close, the position is inside a table.
+    """
+    before = content[:pos]
+    open_count = before.count("<hp:tbl ")
+    close_count = before.count("</hp:tbl>")
+    return open_count > close_count
+
+
+def _find_anchor_outside_table(content: str, anchor_text: str) -> int:
+    """Find anchor_text position that is NOT inside a <hp:tbl> block.
+
+    Returns the position, or -1 if not found outside any table.
+    """
+    start = 0
+    while True:
+        pos = content.find(anchor_text, start)
+        if pos == -1:
+            return -1
+        if not _is_inside_table(content, pos):
+            return pos
+        # Skip this match and try the next one
+        start = pos + len(anchor_text)
+
+
 def insert_after_anchor(content: str, anchor_text: str, new_xml: str) -> str:
     """Insert new XML after the paragraph containing anchor_text.
 
     Finds the <hp:p> element containing anchor_text and inserts new_xml
-    after the closing </hp:p> tag.
+    after the closing </hp:p> tag. Skips matches inside <hp:tbl> blocks.
     """
-    # Find the anchor text position
-    anchor_pos = content.find(anchor_text)
+    # Find the anchor text position (outside tables)
+    anchor_pos = _find_anchor_outside_table(content, anchor_text)
     if anchor_pos == -1:
-        print(f"WARNING: Anchor text '{anchor_text}' not found", file=sys.stderr)
+        print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
         return content
 
     # Find the closing </hp:p> after the anchor
@@ -215,10 +243,13 @@ def insert_after_anchor(content: str, anchor_text: str, new_xml: str) -> str:
 
 
 def insert_before_anchor(content: str, anchor_text: str, new_xml: str) -> str:
-    """Insert new XML before the paragraph containing anchor_text."""
-    anchor_pos = content.find(anchor_text)
+    """Insert new XML before the paragraph containing anchor_text.
+
+    Skips matches inside <hp:tbl> blocks.
+    """
+    anchor_pos = _find_anchor_outside_table(content, anchor_text)
     if anchor_pos == -1:
-        print(f"WARNING: Anchor text '{anchor_text}' not found", file=sys.stderr)
+        print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
         return content
 
     # Find the opening <hp:p that contains this anchor

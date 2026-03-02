@@ -583,6 +583,8 @@ rm -f "$SECTION"
 12. **빈 줄**: `<hp:t/>` 사용 (self-closing tag)
 13. **lxml로 section0.xml 파싱 금지**: lxml은 footer, tbl, header 등 원본 XML 구조를 파괴한다. 반드시 **문자열 기반(str.replace, re.sub)** 방식으로 편집하거나 `edit_section.py` 사용
 14. **report 제목은 drawText 내부**: report 템플릿의 제목은 일반 `<hp:t>` 문단이 아니라 drawText 도형 내부에 있음. `--replace-title` 옵션 또는 `edit_section.py --replace-title` 사용
+15. **linesegarray 제거 필수**: `--replace`로 텍스트 길이가 변경되면 `<hp:linesegarray>` 레이아웃 캐시가 무효화되어 글자 겹침 발생. `build_hwpx.py`는 `--replace` 후 자동 제거. 수동 편집 시에도 반드시 제거할 것
+16. **표 treatAsChar="0"**: 표의 `<hp:pos treatAsChar="0">`을 사용. `treatAsChar="1"`(인라인)은 앞 문단과 같은 줄에 배치되어 여백이 비정상적으로 넓어지는 문제 발생
 
 ---
 
@@ -622,6 +624,21 @@ correct = '\U000F03DA'  # U+F03DA (4바이트, Supplementary PUA-B) ← 정상
 - `add_style.py`가 자동 갱신
 
 ### 7. report 템플릿의 secPr/머리글/footer 구조를 누락하지 마라
+### 8. linesegarray를 남겨두지 마라
+- `<hp:linesegarray>`는 한글이 저장 시 생성하는 **문자별 위치 레이아웃 캐시**
+- `--replace`로 텍스트 길이가 바뀌면 이 캐시가 원래 길이 기준이라 **글자가 겹치거나 잘림**
+- `build_hwpx.py`는 `--replace` 후 자동으로 제거 (`re.sub`으로 전체 블록 삭제)
+- 수동으로 section0.xml을 편집한 경우에도 반드시 제거:
+```python
+content = re.sub(r'\s*<hp:linesegarray>.*?</hp:linesegarray>', '', content, flags=re.DOTALL)
+```
+- 한글 프로그램은 linesegarray가 없으면 열 때 자동 재계산하므로 삭제해도 안전
+
+### 9. 앵커 텍스트가 표 안에도 있을 수 있다 — 표 밖 매치만 사용하라
+- `insert_after_anchor("세부 추진 일정", ...)` 호출 시, 해당 텍스트가 표 셀 안에도 존재할 수 있음
+- 표 내부 `<hp:tbl>...<hp:t>세부 추진 일정</hp:t>...</hp:tbl>` 위치에 삽입하면 표 구조가 깨짐
+- `edit_section.py`와 `add_table.py`는 `_find_anchor_outside_table()`로 표 밖 매치만 사용
+- 직접 `content.find()`를 쓸 때도 반드시 해당 위치가 `<hp:tbl>` 내부인지 확인
 - report 템플릿의 section0.xml에는 secPr 문단, 머리글 이미지(container+rect+pic), 헤더/푸터 5개, drawText 도형 등 복잡한 구조가 있다
 - 커스텀 section0.xml 사용 시 원본의 앞부분(secPr~로고)과 뒷부분(footer)을 반드시 보존
 - 가장 안전한 방법: 기본 빌드 → unpack → 문자열 편집 → repack
@@ -759,7 +776,7 @@ rm -rf ./unpacked/ /tmp/table_data.json
 ```
 
 필수 속성:
-- `treatAsChar="1"` (인라인 표)
+- `treatAsChar="0"` (독립 배치, **"1"이면 앞 문단과 같은 줄에 배치되어 여백 이상**)
 - `pageBreak="CELL"`
 - `repeatHeader="1"` (페이지 넘김 시 헤더 반복)
 - 표 너비 = 본문폭 (report: 48190, gonmun: 42520)
@@ -848,3 +865,182 @@ rm -rf ./unpacked/ /tmp/table_data.json
 
 - **표 너비**: 본문폭 이내 (report: 48190, gonmun: 42520)
 - **표 전용 paraPr 사용**: paraPr 0 대신 표 전용 paraPr을 새로 만들어 기본 폰트 fallback 방지
+
+### 열별 정렬 (col_aligns)
+
+table_data.json에 `col_aligns`를 지정하면 열마다 개별 정렬 적용 (헤더 행 제외):
+
+```json
+{
+  "columns": ["분류", "항목", "2024년", "2025년", "2026년"],
+  "col_aligns": ["CENTER", "CENTER", "LEFT", "LEFT", "LEFT"],
+  "rows": [...]
+}
+```
+
+- `col_aligns` 지정 시 해당 열의 body 셀은 `category_align`/`item_align`/`content_align` 대신 `col_aligns[col]` 적용
+- 헤더 행은 항상 `header_align` 적용 (보통 CENTER)
+- `col_aligns` 미지정 시 기존 방식(category/item/content 기반) 동작
+- 값: `"LEFT"`, `"CENTER"`, `"RIGHT"`
+
+---
+
+## report 다중 섹션 워크플로우
+
+report 템플릿의 section0.xml에는 footer(꼬리말)가 포함되어 있다. 섹션을 추가할 때 footer와 섹션 내용이 엉키지 않도록 주의해야 한다.
+
+### 기본 원칙
+
+1. **section0.xml 하나에 모든 내용**: report 템플릿은 단일 `<hs:sec>` 안에 모든 내용이 들어간다
+2. **footer는 `<hs:sec>` 닫기 직전**: footer/header 요소는 `</hs:sec>` 바로 앞에 위치
+3. **새 내용은 footer 앞에 삽입**: `insert_before_closing_sec()` 또는 앵커 기반 삽입 사용
+4. **표는 반드시 unpack → 삽입 → repack**: `add_table.py`가 header.xml 스타일을 추가해야 하므로
+
+### 안전한 내용 추가 순서
+
+```bash
+# 1. 기본 빌드 (플레이스홀더 치환)
+python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
+  --replace "섹션1 제목=추진 배경" --replace "섹션2 제목=추진 계획" \
+  --replace-title "AI 활용 업무보고" \
+  --output report.hwpx
+
+# 2. unpack
+python3 "$SKILL_DIR/scripts/office/unpack.py" report.hwpx ./unpacked/
+
+# 3. 섹션 추가 (edit_section.py — 앵커 기반)
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-section-title "향후 계획" --after "추진 계획"
+
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-body "3월 중 시범운영 착수" --after "향후 계획"
+
+# 4. 표 삽입 (필요 시)
+python3 "$SKILL_DIR/scripts/add_table.py" ./unpacked/ \
+  --data /tmp/table_data.json --insert-after "세부 추진 일정" \
+  --body-width 48190
+
+# 5. repack
+python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
+```
+
+### 주의사항
+
+- `edit_section.py`의 앵커 검색은 표 내부 매치를 자동 건너뜀 (Anti-pattern #9)
+- 플레이스홀더 치환 후 linesegarray가 자동 제거됨 (Critical Rule #15)
+- 새 섹션 제목은 `make_section_title()`로 올바른 U+F03DA 기호 사용
+
+---
+
+## 관공서 문서 구조 가이드 (8-Section)
+
+울산광역시교육청 업무보고서의 표준 구조. 모든 섹션이 필수는 아니며, 보고 내용에 따라 취사선택.
+
+### 표준 8-섹션 구성
+
+| 순서 | 섹션명 | 설명 | 필수 |
+|------|--------|------|------|
+| 1 | 추진 배경 | 사업/업무의 배경과 필요성 | O |
+| 2 | 추진 근거 | 법적 근거, 상위 계획, 관련 규정 | △ |
+| 3 | 현황 | 현재 상태, 통계, 실적 | O |
+| 4 | 문제점/개선방향 | 현 체제의 문제점과 개선 방향 | △ |
+| 5 | 추진 계획 | 세부 추진 사항, 일정 | O |
+| 6 | 기대 효과 | 사업 추진으로 기대되는 성과 | △ |
+| 7 | 행정 사항 | 예산, 인력, 유의사항 | △ |
+| 8 | 향후 계획 | 향후 일정, 추진 로드맵 | O |
+
+### 섹션별 작성 요령
+
+**추진 배경**: 왜 이 업무를 추진하는지 간결하게 서술. 상위 기관 지시, 사회적 필요, 현장 요구 등.
+
+**추진 근거**: 관련 법령, 교육부 지침, 교육청 계획 등을 명시. (예: "교육부 2026년 업무계획", "울산교육 미래비전 2030")
+
+**현황**: 구체적 수치와 함께 현 상태 서술. 표를 활용하면 효과적.
+
+**추진 계획**: 가장 중요한 섹션. 세부 사업별로 기간, 대상, 방법을 명시. 표 삽입 권장.
+
+**기대 효과**: 정량적(수치) + 정성적(서술) 효과 병기.
+
+**향후 계획**: 월별/분기별 추진 일정을 표로 정리.
+
+### 작성 예시 (CLI)
+
+```bash
+# 6-섹션 보고서 (배경, 현황, 추진계획, 기대효과, 행정사항, 향후계획)
+python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
+  --replace "섹션1 제목=추진 배경" \
+  --replace "본문 내용=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
+  --replace "세부 내용=교육부 '2026년 AI 디지털 교육 활성화 계획' 시행" \
+  --replace "섹션2 제목=현황 및 추진 계획" \
+  --replace "표 제목=연도별 추진 일정" \
+  --replace-title "AI 디지털 교육 활성화 보고" \
+  --output report.hwpx
+
+# unpack 후 추가 섹션 삽입
+python3 "$SKILL_DIR/scripts/office/unpack.py" report.hwpx ./unpacked/
+
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-section-title "기대 효과" --after "연도별 추진 일정"
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-body "AI 활용 수업 만족도 30% 향상" --after "기대 효과"
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-body "교원 업무 부담 20% 경감" --after "AI 활용 수업 만족도"
+
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-section-title "향후 계획" --after "교원 업무 부담"
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-body "2026. 3. 시범학교 10교 선정 및 운영" --after "향후 계획"
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
+  --add-body "2026. 6. 중간 성과 분석 및 확대 방안 마련" --after "시범학교 10교"
+
+python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_full.hwpx
+```
+
+---
+
+## 문단 작성 규칙
+
+### 핵심 원칙: 1문단 3줄 이내
+
+관공서 보고서는 **간결한 문장**이 핵심. 한 문단(❍ 항목)은 **최대 3줄(약 120자)** 이내로 작성.
+
+### 구체적 기준
+
+| 항목 | 기준 | 비고 |
+|------|------|------|
+| 문단 길이 | 최대 3줄 (120자) | A4 170mm 기준, 15pt 휴먼명조 |
+| 문장 수 | 1~2문장 | 3문장 이상 시 분리 |
+| 세부 항목 | 하위 레벨로 분리 | ❍ → - → ※ 순으로 전개 |
+| 표 활용 | 3항목 이상 나열은 표 사용 | 가독성 향상 |
+
+### 나쁜 예 vs 좋은 예
+
+**나쁜 예** (5줄, 장문):
+```
+❍ AI 활용 교육 추진을 위해 2024년부터 교육부에서 추진한 AI 디지털 교과서 도입 사업의 일환으로
+   울산광역시교육청에서는 자체적으로 AI 기반 맞춤형 학습 플랫폼을 개발하여 시범운영 중이며,
+   2025년 시범운영 결과 학생 학습 성취도가 평균 15% 향상되었고 교원 만족도도 85%에 달하는
+   성과를 거두었으며, 이에 2026년에는 전체 학교로 확대 적용할 계획으로 이를 위한 예산 확보 및
+   시스템 고도화 작업을 추진하고자 함
+```
+
+**좋은 예** (구조화):
+```
+❍ AI 기반 맞춤형 학습 플랫폼 전교 확대 추진
+  - 2025년 시범운영 성과: 학습 성취도 15%↑, 교원 만족도 85%
+  - 2026년 전체 학교 확대를 위한 예산 확보 및 시스템 고도화
+  ※ 교육부 'AI 디지털 교과서 도입 사업' 연계 추진
+```
+
+### XML 적용
+
+```python
+# 나쁜 예: 한 문단에 모든 내용
+make_body_paragraph("AI 기반 맞춤형 학습 플랫폼을 개발하여 시범운영 중이며, 2025년 시범운영 결과 학생 학습 성취도가...")
+
+# 좋은 예: 구조화하여 분리
+make_body_paragraph("AI 기반 맞춤형 학습 플랫폼 전교 확대 추진")
+make_sub_paragraph("2025년 시범운영 성과: 학습 성취도 15%↑, 교원 만족도 85%")
+make_sub_paragraph("2026년 전체 학교 확대를 위한 예산 확보 및 시스템 고도화")
+make_note_paragraph("교육부 'AI 디지털 교과서 도입 사업' 연계 추진")
+```

@@ -33,7 +33,8 @@ table_data.json format:
     "header_align": "CENTER",
     "category_align": "CENTER",
     "item_align": "CENTER",
-    "content_align": "LEFT"
+    "content_align": "LEFT",
+    "col_aligns": ["CENTER", "CENTER", "LEFT", "LEFT", "LEFT"]
 }
 """
 
@@ -75,6 +76,19 @@ def _escape_xml(text: str) -> str:
     )
 
 
+def _find_anchor_outside_table(content: str, anchor_text: str) -> int:
+    """Find anchor_text position that is NOT inside a <hp:tbl> block."""
+    start = 0
+    while True:
+        pos = content.find(anchor_text, start)
+        if pos == -1:
+            return -1
+        before = content[:pos]
+        if before.count("<hp:tbl ") <= before.count("</hp:tbl>"):
+            return pos
+        start = pos + len(anchor_text)
+
+
 def generate_table_xml(
     table_data: dict,
     style_ids: dict,
@@ -109,6 +123,10 @@ def generate_table_xml(
     category_align = table_data.get("category_align", "CENTER")
     item_align = table_data.get("item_align", "CENTER")
     content_align = table_data.get("content_align", "LEFT")
+
+    # Per-column alignment overrides (optional)
+    # col_aligns: ["CENTER", "LEFT", "RIGHT", ...] — one per column
+    col_aligns: list[str] | None = table_data.get("col_aligns")
 
     # Style IDs
     cp_bold = style_ids["charpr_bold"]
@@ -150,6 +168,10 @@ def generate_table_xml(
         if is_header:
             cp = cp_bold
             pp = _get_parapr(header_align)
+        elif col_aligns and col < len(col_aligns):
+            # Per-column alignment takes priority over category/item/content defaults
+            cp = cp_normal
+            pp = _get_parapr(col_aligns[col])
         elif is_category:
             cp = cp_normal
             pp = _get_parapr(category_align)
@@ -201,7 +223,7 @@ def generate_table_xml(
         f'borderFillIDRef="{default_bf}" noAdjust="0">'
         f'<hp:sz width="{body_width}" widthRelTo="ABSOLUTE" '
         f'height="{CELL_HEIGHT}" heightRelTo="ABSOLUTE" protect="0"/>'
-        f'<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" '
+        f'<hp:pos treatAsChar="0" affectLSpacing="0" flowWithText="1" '
         f'allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" '
         f'horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" '
         f'vertOffset="0" horzOffset="0"/>'
@@ -314,9 +336,10 @@ def insert_table(
     section_content = section_path.read_text(encoding="utf-8")
 
     if insert_after:
-        anchor_pos = section_content.find(insert_after)
+        # Find anchor outside <hp:tbl> blocks to avoid matching inside tables
+        anchor_pos = _find_anchor_outside_table(section_content, insert_after)
         if anchor_pos == -1:
-            print(f"WARNING: Anchor text '{insert_after}' not found", file=sys.stderr)
+            print(f"WARNING: Anchor text '{insert_after}' not found (outside tables)", file=sys.stderr)
             close_tag = "</hs:sec>"
             pos = section_content.rfind(close_tag)
             section_content = section_content[:pos] + table_xml + section_content[pos:]
