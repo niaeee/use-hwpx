@@ -292,6 +292,7 @@ def insert_table(
     header_bg: str = "#DCDCDC",
     body_width: int = 48190,
     spacing: int = -5,
+    fallback_append: bool = False,
 ) -> dict:
     """Insert a table into section0.xml with automatic style management.
 
@@ -339,10 +340,16 @@ def insert_table(
         # Find anchor outside <hp:tbl> blocks to avoid matching inside tables
         anchor_pos = _find_anchor_outside_table(section_content, insert_after)
         if anchor_pos == -1:
-            print(f"WARNING: Anchor text '{insert_after}' not found (outside tables)", file=sys.stderr)
-            close_tag = "</hs:sec>"
-            pos = section_content.rfind(close_tag)
-            section_content = section_content[:pos] + table_xml + section_content[pos:]
+            if fallback_append:
+                print(f"WARNING: Anchor '{insert_after}' not found, appending to end", file=sys.stderr)
+                close_tag = "</hs:sec>"
+                pos = section_content.rfind(close_tag)
+                section_content = section_content[:pos] + table_xml + section_content[pos:]
+            else:
+                raise SystemExit(
+                    f"ERROR: Anchor text '{insert_after}' not found (outside tables).\n"
+                    f"  Use --fallback-append to insert at document end instead."
+                )
         else:
             close_pos = section_content.find("</hp:p>", anchor_pos)
             if close_pos != -1:
@@ -396,6 +403,10 @@ def main() -> None:
         "--append", action="store_true",
         help="Append table before </hs:sec> (if --insert-after not given)",
     )
+    parser.add_argument(
+        "--fallback-append", action="store_true",
+        help="If anchor not found, append to end instead of erroring",
+    )
     args = parser.parse_args()
 
     if not args.data.is_file():
@@ -423,6 +434,7 @@ def main() -> None:
         font_size=args.font_size * 100,
         header_bg=args.header_bg,
         body_width=args.body_width,
+        fallback_append=args.fallback_append,
     )
 
     print(json.dumps(style_ids, indent=2))

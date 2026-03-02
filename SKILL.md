@@ -125,9 +125,10 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report --output report.hwp
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "작성일=2026. 3. 2.(월)" --replace "부서=총무과" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
-  --replace "섹션1 제목=추진 배경" --replace "본문 내용=교육환경 개선 사업 추진" \
+  --replace "섹션1 제목=추진 배경" --replace "본문 내용1=교육환경 개선 사업 추진" \
   --replace "세부 내용=노후 교실 리모델링" --replace "비고=예산 확보 완료" \
-  --replace "섹션2 제목=추진 계획" --replace "표 제목=세부 추진 일정" \
+  --replace "섹션2 제목=추진 계획" --replace "본문 내용2=교육시설 현대화 추진" \
+  --replace "표 제목=세부 추진 일정" \
   --title "교육환경 개선 보고" --creator "총무과" --output report.hwpx
 
 # 커스텀 section0.xml 사용 (서식은 유지, 내용만 교체)
@@ -150,11 +151,11 @@ python3 "$SKILL_DIR/scripts/validate.py" report.hwpx
 | 4 | 12 | — | [PIC 로고(image2)] |
 | 5 | 12 | 13 | {{작성일}}  {{부서}} {{직위}} {{작성자}} ☏{{연락처}} |
 | 6 | 16 | 7/8 | 󰏚 {{섹션1 제목}} (HY헤드라인M 16pt) |
-| 7 | 17 | 9 | ❍ {{본문 내용}} (휴먼명조 15pt) |
+| 7 | 17 | 9 | ❍ {{본문 내용1}} (휴먼명조 15pt) |
 | 8 | 17 | 9 | - {{세부 내용}} (휴먼명조 15pt) |
 | 9 | 17 | 10 | ※ {{비고}} (중고딕 13pt) |
 | 10 | 17 | 7/8 | 󰏚 {{섹션2 제목}} (HY헤드라인M 16pt) |
-| 11 | 17 | 9 | ❍ {{본문 내용}} (휴먼명조 15pt) |
+| 11 | 17 | 9 | ❍ {{본문 내용2}} (휴먼명조 15pt) |
 | 12 | 17 | 9 | ❍ {{표 제목}} + [TABLE 2x2] + [PIC 구분선(image3)] |
 
 ### BinData (이미지) 구조
@@ -517,7 +518,7 @@ rm -f "$SECTION"
 | {{작성자}} | report | 작성자 성명 |
 | {{연락처}} | report | 연락처 전화번호 |
 | {{섹션1 제목}}, {{섹션2 제목}} | report | 각 섹션 제목 |
-| {{본문 내용}} | report | 본문 (2회 사용, 동일 값 치환) |
+| {{본문 내용1}}, {{본문 내용2}} | report | 본문 (섹션별 개별 치환) |
 | {{세부 내용}} | report | 세부 사항 |
 | {{비고}} | report | 참고/비고 |
 | {{표 제목}} | report | 표 앞 설명 |
@@ -585,6 +586,9 @@ rm -f "$SECTION"
 14. **report 제목은 drawText 내부**: report 템플릿의 제목은 일반 `<hp:t>` 문단이 아니라 drawText 도형 내부에 있음. `--replace-title` 옵션 또는 `edit_section.py --replace-title` 사용
 15. **linesegarray 제거 필수**: `--replace`로 텍스트 길이가 변경되면 `<hp:linesegarray>` 레이아웃 캐시가 무효화되어 글자 겹침 발생. `build_hwpx.py`는 `--replace` 후 자동 제거. 수동 편집 시에도 반드시 제거할 것
 16. **표 treatAsChar="0"**: 표의 `<hp:pos treatAsChar="0">`을 사용. `treatAsChar="1"`(인라인)은 앞 문단과 같은 줄에 배치되어 여백이 비정상적으로 넓어지는 문제 발생
+17. **앵커 텍스트 고유성**: 동일 텍스트가 여러 곳에 있으면 의도와 다른 위치에 삽입됨. 다중 매치 시 `--after-nth N`으로 N번째 매치 지정. 짧은 부분문자열(예: "계획") 대신 고유한 전체 문구 사용
+18. **add_table.py 앵커 필수**: 앵커 텍스트를 찾지 못하면 ERROR로 중단. 문서 끝 삽입이 의도적이면 `--fallback-append` 명시
+19. **report footer 구조 보존**: report section0.xml의 footer는 `<hp:p>` 내부 `<hp:ctrl><hp:footer>` 구조. footer가 포함된 문단을 삭제하면 XML 깨짐. footer 문단은 절대 삭제/이동 금지
 
 ---
 
@@ -633,6 +637,14 @@ correct = '\U000F03DA'  # U+F03DA (4바이트, Supplementary PUA-B) ← 정상
 content = re.sub(r'\s*<hp:linesegarray>.*?</hp:linesegarray>', '', content, flags=re.DOTALL)
 ```
 - 한글 프로그램은 linesegarray가 없으면 열 때 자동 재계산하므로 삭제해도 안전
+
+### 10. 짧은 앵커 텍스트를 사용하지 마라
+- "계획", "현황" 같은 짧은 단어는 문서 내 여러 곳에 존재할 수 있어 의도와 다른 위치에 삽입됨
+- 전체 문구(예: "연도별 추진 일정", "추진 배경") 사용. 다중 매치 시 `--after-nth N` 활용
+
+### 11. add_table.py 앵커 에러를 무시하지 마라
+- 앵커 미발견 시 ERROR로 중단됨 (이전에는 WARNING+문서 끝 삽입이었으나 수정됨)
+- 의도적 문서 끝 삽입은 `--fallback-append` 또는 `--append` 사용
 
 ### 9. 앵커 텍스트가 표 안에도 있을 수 있다 — 표 밖 매치만 사용하라
 - `insert_after_anchor("세부 추진 일정", ...)` 호출 시, 해당 텍스트가 표 셀 안에도 존재할 수 있음
@@ -712,9 +724,10 @@ source "$VENV"
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "작성일=2026. 3. 2.(월)" --replace "부서=교육혁신과" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
-  --replace "섹션1 제목=추진 배경" --replace "본문 내용=AI 활용 교육 추진" \
+  --replace "섹션1 제목=추진 배경" --replace "본문 내용1=AI 활용 교육 추진" \
   --replace "세부 내용=교실 수업 적용" --replace "비고=예산 확보 완료" \
-  --replace "섹션2 제목=추진 계획" --replace "표 제목=세부 추진 일정" \
+  --replace "섹션2 제목=추진 계획" --replace "본문 내용2=세부 추진 사항" \
+  --replace "표 제목=세부 추진 일정" \
   --replace-title "AI 활용 업무보고" \
   --title "AI 활용 업무보고" --creator "교육혁신과" --output report.hwpx
 
@@ -969,7 +982,7 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
 # 6-섹션 보고서 (배경, 현황, 추진계획, 기대효과, 행정사항, 향후계획)
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "섹션1 제목=추진 배경" \
-  --replace "본문 내용=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
+  --replace "본문 내용1=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
   --replace "세부 내용=교육부 '2026년 AI 디지털 교육 활성화 계획' 시행" \
   --replace "섹션2 제목=현황 및 추진 계획" \
   --replace "표 제목=연도별 추진 일정" \
@@ -1013,34 +1026,12 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_full.hwpx
 | 세부 항목 | 하위 레벨로 분리 | ❍ → - → ※ 순으로 전개 |
 | 표 활용 | 3항목 이상 나열은 표 사용 | 가독성 향상 |
 
-### 나쁜 예 vs 좋은 예
+### 예시
 
-**나쁜 예** (5줄, 장문):
-```
-❍ AI 활용 교육 추진을 위해 2024년부터 교육부에서 추진한 AI 디지털 교과서 도입 사업의 일환으로
-   울산광역시교육청에서는 자체적으로 AI 기반 맞춤형 학습 플랫폼을 개발하여 시범운영 중이며,
-   2025년 시범운영 결과 학생 학습 성취도가 평균 15% 향상되었고 교원 만족도도 85%에 달하는
-   성과를 거두었으며, 이에 2026년에는 전체 학교로 확대 적용할 계획으로 이를 위한 예산 확보 및
-   시스템 고도화 작업을 추진하고자 함
-```
-
-**좋은 예** (구조화):
+장문 → 구조화 분리:
 ```
 ❍ AI 기반 맞춤형 학습 플랫폼 전교 확대 추진
   - 2025년 시범운영 성과: 학습 성취도 15%↑, 교원 만족도 85%
   - 2026년 전체 학교 확대를 위한 예산 확보 및 시스템 고도화
   ※ 교육부 'AI 디지털 교과서 도입 사업' 연계 추진
-```
-
-### XML 적용
-
-```python
-# 나쁜 예: 한 문단에 모든 내용
-make_body_paragraph("AI 기반 맞춤형 학습 플랫폼을 개발하여 시범운영 중이며, 2025년 시범운영 결과 학생 학습 성취도가...")
-
-# 좋은 예: 구조화하여 분리
-make_body_paragraph("AI 기반 맞춤형 학습 플랫폼 전교 확대 추진")
-make_sub_paragraph("2025년 시범운영 성과: 학습 성취도 15%↑, 교원 만족도 85%")
-make_sub_paragraph("2026년 전체 학교 확대를 위한 예산 확보 및 시스템 고도화")
-make_note_paragraph("교육부 'AI 디지털 교과서 도입 사업' 연계 추진")
 ```
