@@ -84,6 +84,45 @@ def _escape_xml(text: str) -> str:
     )
 
 
+VALID_ALIGNS = {"LEFT", "CENTER", "RIGHT"}
+
+
+def _validate_table_data(td: dict, body_width: int = 48190) -> dict:
+    """Validate and normalize table_data. Auto-converts list rows to dict format."""
+    if "columns" not in td:
+        raise SystemExit("ERROR: table_data must have 'columns'")
+    if "rows" not in td:
+        raise SystemExit("ERROR: table_data must have 'rows'")
+    if not isinstance(td["columns"], list) or not all(isinstance(c, str) for c in td["columns"]):
+        raise SystemExit("ERROR: 'columns' must be a list of strings")
+
+    # Auto-convert list rows → {"data": row} dicts
+    rows = td["rows"]
+    if rows and isinstance(rows[0], list):
+        td["rows"] = [{"data": r} for r in rows]
+        print("  Auto-converted rows from list format to dict format", file=sys.stderr)
+
+    col_count = len(td["columns"])
+    for i, r in enumerate(td["rows"]):
+        if not isinstance(r, dict) or "data" not in r:
+            raise SystemExit(f"ERROR: rows[{i}] must be dict with 'data' key (got {type(r).__name__})")
+        if len(r["data"]) > col_count:
+            raise SystemExit(f"ERROR: rows[{i}] has {len(r['data'])} values but only {col_count} columns")
+
+    if "col_widths" in td:
+        cw = td["col_widths"]
+        if len(cw) != col_count:
+            raise SystemExit(f"ERROR: col_widths has {len(cw)} items but {col_count} columns")
+        if sum(cw) > body_width:
+            print(f"WARNING: col_widths sum ({sum(cw)}) exceeds body_width ({body_width})", file=sys.stderr)
+
+    if "col_aligns" in td:
+        for a in td["col_aligns"]:
+            if a not in VALID_ALIGNS:
+                raise SystemExit(f"ERROR: Invalid col_align '{a}'. Must be LEFT/CENTER/RIGHT")
+    return td
+
+
 _NESTED_TAGS = [
     ("<hp:tbl ", "</hp:tbl>"), ("<hp:footer ", "</hp:footer>"),
     ("<hp:header ", "</hp:header>"), ("<hp:drawText ", "</hp:drawText>"),
@@ -454,11 +493,7 @@ def main() -> None:
         raise SystemExit(f"ERROR: Data file not found: {args.data}")
 
     table_data = json.loads(args.data.read_text(encoding="utf-8"))
-
-    if "columns" not in table_data:
-        raise SystemExit("ERROR: table_data must have 'columns'")
-    if "rows" not in table_data:
-        raise SystemExit("ERROR: table_data must have 'rows'")
+    table_data = _validate_table_data(table_data, args.body_width)
 
     insert_after = args.insert_after
     insert_before_sec_end = args.append and not insert_after

@@ -650,6 +650,14 @@ correct = '\U000F03DA'  # U+F03DA (4바이트, Supplementary PUA-B) ← 정상
 - 20회 이상 `--add-section-title`/`--add-body`를 개별 호출하면 앵커 충돌 위험
 - 다중 섹션은 반드시 `--bulk-insert sections.json` 사용 (한 번에 모든 문단을 삽입하여 앵커 충돌 원천 차단)
 
+### 14. bulk-insert에서 미인식 type을 사용하지 마라
+- `"detail"`, `"item"`, `"remark"`는 별칭으로 자동 매핑됨 (→ sub, body, note)
+- 그 외 미인식 type은 `paraPrIDRef=0`, `charPrIDRef=0`(기본 스타일)으로 출력되어 서식이 깨짐
+
+### 15. add_table.py rows를 리스트 배열로 작성하지 마라
+- `[["a","b"]]` (X) → `[{"data":["a","b"]}]` (O)
+- 리스트 배열은 자동 변환되지만, `category_span` 등 고급 옵션 사용 불가
+
 ---
 
 ## 폰트 이름 정확한 표기
@@ -981,10 +989,10 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
 
 **향후 계획**: 월별/분기별 추진 일정을 표로 정리.
 
-### 작성 예시 (CLI)
+### 작성 예시 (CLI — bulk-insert 권장)
 
 ```bash
-# 6-섹션 보고서 (배경, 현황, 추진계획, 기대효과, 행정사항, 향후계획)
+# 1. 기본 빌드 (템플릿 섹션1/2 치환)
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "섹션1 제목=추진 배경" \
   --replace "본문 내용1=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
@@ -994,23 +1002,26 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace-title "AI 디지털 교육 활성화 보고" \
   --output report.hwpx
 
-# unpack 후 추가 섹션 삽입
+# 2. unpack
 python3 "$SKILL_DIR/scripts/office/unpack.py" report.hwpx ./unpacked/
 
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-section-title "기대 효과" --after "연도별 추진 일정"
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-body "AI 활용 수업 만족도 30% 향상" --after "기대 효과"
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-body "교원 업무 부담 20% 경감" --after "AI 활용 수업 만족도"
+# 3. 추가 섹션 일괄 삽입 (--bulk-insert 사용)
+cat > /tmp/extra.json << 'EOFJ'
+{
+  "insert_after": "연도별 추진 일정",
+  "paragraphs": [
+    {"type": "section_title", "text": "기대 효과"},
+    {"type": "body", "text": "AI 활용 수업 만족도 30% 향상"},
+    {"type": "body", "text": "교원 업무 부담 20% 경감"},
+    {"type": "section_title", "text": "향후 계획"},
+    {"type": "body", "text": "2026. 3. 시범학교 10교 선정 및 운영"},
+    {"type": "body", "text": "2026. 6. 중간 성과 분석 및 확대 방안 마련"}
+  ]
+}
+EOFJ
+python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ --bulk-insert /tmp/extra.json
 
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-section-title "향후 계획" --after "교원 업무 부담"
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-body "2026. 3. 시범학교 10교 선정 및 운영" --after "향후 계획"
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-body "2026. 6. 중간 성과 분석 및 확대 방안 마련" --after "시범학교 10교"
-
+# 4. repack
 python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_full.hwpx
 ```
 
@@ -1040,3 +1051,101 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_full.hwpx
   - 2026년 전체 학교 확대를 위한 예산 확보 및 시스템 고도화
   ※ 교육부 'AI 디지털 교과서 도입 사업' 연계 추진
 ```
+
+---
+
+## 목차 체계 의미 판단 기준
+
+### 판단 원칙
+1. "왜?" "어떻게?"로 연결되면 → **상하 관계** (❍ → - → ※)
+2. "그리고", "또한"으로 연결되면 → **병렬 관계** (모두 ❍)
+3. 3항목 이상 나열 → **표** 사용 권장
+
+### 관계별 사용 기호
+
+| 관계 | 기호 | type | 예시 |
+|------|------|------|------|
+| 핵심 주장/사실 | ❍ | body | "학습동아리 운영 필요" |
+| 주장의 근거/부연 | - | sub | "교육부 계획 연계" |
+| 참고/주의/수치 | ※ | note | "AI 챔피언 인증 획득" |
+| 병렬 나열 (동일 레벨) | 모두 ❍ | body | 예산/인력/협조 |
+
+### 섹션별 패턴
+
+**상하 관계** (추진 배경, 기대 효과 등):
+```
+❍ 핵심 주장
+  - 부연 설명/근거
+    ※ 참고 수치
+```
+
+**병렬 나열** (행정 사항, 향후 계획 등):
+```
+❍ (예산) 연간 2,318천원 한도
+❍ (인력) 담당자 2명 배치
+❍ (협조) 유관기관 MOU 체결
+```
+
+---
+
+## bulk-insert JSON 스키마
+
+### 지원 타입
+
+| type | 기호 | paraPr | charPr | 폰트 | 설명 |
+|------|------|--------|--------|------|------|
+| section_title | 󰏚 | 16 | 7/8 | HY헤드라인M 16pt | 섹션 제목 |
+| body | ❍ | 17 | 9 | 휴먼명조 15pt | 본문 항목 |
+| sub | - | 17 | 9 | 휴먼명조 15pt | 세부 항목 |
+| note | ※ | 17 | 10 | 중고딕 13pt | 비고/참고 |
+| blank | (없음) | 0 | 0 | — | 빈 줄 |
+
+### 별칭(alias)
+
+| 별칭 | 실제 type | 비고 |
+|------|----------|------|
+| detail | sub | 세부 항목 |
+| item | body | 본문 항목 |
+| remark | note | 비고 |
+
+### JSON 형식
+```json
+{
+  "insert_after": "앵커 텍스트",
+  "paragraphs": [
+    {"type": "section_title", "text": "섹션 제목"},
+    {"type": "body", "text": "본문 항목"},
+    {"type": "sub", "text": "세부 항목"},
+    {"type": "note", "text": "비고 항목"},
+    {"type": "blank"}
+  ]
+}
+```
+
+---
+
+## table_data.json 스키마
+
+### 필수 필드
+```json
+{
+  "columns": ["분류", "항목", "내용"],
+  "rows": [
+    {"data": ["교육", "AI 챔피언", "자격시험 도입"], "category_span": 2},
+    {"data": ["", "디지털 리터러시", "전 직원 대상"]}
+  ]
+}
+```
+
+### 선택 필드
+| 필드 | 타입 | 기본값 | 설명 |
+|------|------|--------|------|
+| col_widths | int[] | 균등 분할 | 열 너비(HWPUNIT). 합 ≤ body_width |
+| col_aligns | str[] | — | 열별 정렬 (LEFT/CENTER/RIGHT) |
+| header_align | str | CENTER | 헤더 행 정렬 |
+| category_align | str | CENTER | 첫 번째 열(분류) 정렬 |
+| content_align | str | LEFT | 내용 열 정렬 |
+
+### rows 호환
+- **dict 형식** (권장): `[{"data": ["a","b"], "category_span": 2}]`
+- **list 형식** (자동 변환): `[["a","b"]]` → `[{"data": ["a","b"]}]`로 자동 변환됨. 단 `category_span` 사용 불가

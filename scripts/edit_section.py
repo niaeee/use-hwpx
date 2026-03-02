@@ -27,6 +27,22 @@ from pathlib import Path
 # NEVER use \\uF3DA (U+F3DA, BMP PUA, 3-byte) - it's a DIFFERENT character!
 SECTION_SYMBOL = "\U000F03DA"  # 󰏚
 
+# Type aliases for intuitive naming in bulk-insert / --paragraphs JSON
+TYPE_ALIASES = {"detail": "sub", "item": "body", "remark": "note"}
+KNOWN_TYPES = {"section_title", "body", "sub", "note", "blank"}
+
+
+def _resolve_type(raw_type: str, index: int = -1) -> str:
+    """Resolve type aliases and warn on unknown types."""
+    resolved = TYPE_ALIASES.get(raw_type, raw_type)
+    if resolved not in KNOWN_TYPES:
+        loc = f" at paragraphs[{index}]" if index >= 0 else ""
+        print(
+            f"WARNING: Unknown type '{raw_type}'{loc}, falling back to default style",
+            file=sys.stderr,
+        )
+    return resolved
+
 
 def read_section(unpacked_dir: Path) -> str:
     """Read section0.xml as raw string."""
@@ -335,6 +351,34 @@ def insert_before_closing_sec(content: str, new_xml: str) -> str:
     return content
 
 
+def _build_paragraphs_xml(para_list: list[dict]) -> str:
+    """Build combined XML from a list of paragraph dicts (shared by bulk-insert and --paragraphs)."""
+    xml = ""
+    for i, p in enumerate(para_list):
+        pt = _resolve_type(p.get("type", "text"), i)
+        txt = p.get("text", "")
+        if pt in ("section_title", "body", "sub", "note") and not txt:
+            print(f"WARNING: paragraphs[{i}] type='{pt}' has no text, skipping", file=sys.stderr)
+            continue
+        if pt == "section_title":
+            xml += make_section_title(txt)
+        elif pt == "body":
+            xml += make_body_paragraph(txt)
+        elif pt == "sub":
+            xml += make_sub_paragraph(txt)
+        elif pt == "note":
+            xml += make_note_paragraph(txt)
+        elif pt == "blank":
+            xml += make_blank_line()
+        else:
+            xml += make_paragraph_xml(
+                txt,
+                para_pr_id=p.get("paraPrIDRef", 0),
+                char_pr_id=p.get("charPrIDRef", 0),
+            )
+    return xml
+
+
 def _escape_xml(text: str) -> str:
     """Escape XML special characters."""
     return (
@@ -402,6 +446,10 @@ def main() -> None:
         "--bulk-insert", type=Path, metavar="JSON_FILE",
         help='JSON with {"insert_after": "anchor", "paragraphs": [...]}',
     )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Preview changes without writing to file",
+    )
     args = parser.parse_args()
 
     content = read_section(args.unpacked_dir)
@@ -439,26 +487,7 @@ def main() -> None:
         bulk = json.loads(args.bulk_insert.read_text(encoding="utf-8"))
         b_anchor = bulk.get("insert_after", "")
         paras = bulk.get("paragraphs", [])
-        new_xml = ""
-        for p in paras:
-            pt = p.get("type", "text")
-            txt = p.get("text", "")
-            if pt == "section_title":
-                new_xml += make_section_title(txt)
-            elif pt == "body":
-                new_xml += make_body_paragraph(txt)
-            elif pt == "sub":
-                new_xml += make_sub_paragraph(txt)
-            elif pt == "note":
-                new_xml += make_note_paragraph(txt)
-            elif pt == "blank":
-                new_xml += make_blank_line()
-            else:
-                new_xml += make_paragraph_xml(
-                    txt,
-                    para_pr_id=p.get("paraPrIDRef", 0),
-                    char_pr_id=p.get("charPrIDRef", 0),
-                )
+        new_xml = _build_paragraphs_xml(paras)
         if b_anchor and new_xml:
             content = insert_after_anchor(content, b_anchor, new_xml, nth=args.after_nth)
             print(f"  Bulk-inserted {len(paras)} paragraph(s) after '{b_anchor}'", file=sys.stderr)
@@ -472,28 +501,7 @@ def main() -> None:
             raise SystemExit("ERROR: --paragraphs requires --insert-after or --insert-before")
 
         para_data = json.loads(args.paragraphs.read_text(encoding="utf-8"))
-        new_xml = ""
-        requires_text = {"section_title", "body", "sub", "note"}
-        for i, p in enumerate(para_data):
-            p_type = p.get("type", "text")
-            if p_type in requires_text and "text" not in p:
-                raise SystemExit(f"ERROR: paragraphs[{i}] type='{p_type}' requires 'text' field")
-            if p_type == "section_title":
-                new_xml += make_section_title(p["text"])
-            elif p_type == "body":
-                new_xml += make_body_paragraph(p["text"])
-            elif p_type == "sub":
-                new_xml += make_sub_paragraph(p["text"])
-            elif p_type == "note":
-                new_xml += make_note_paragraph(p["text"])
-            elif p_type == "blank":
-                new_xml += make_blank_line()
-            else:
-                new_xml += make_paragraph_xml(
-                    p.get("text", ""),
-                    para_pr_id=p.get("paraPrIDRef", 0),
-                    char_pr_id=p.get("charPrIDRef", 0),
-                )
+        new_xml = _build_paragraphs_xml(para_data)
 
         if args.insert_after:
             content = insert_after_anchor(content, args.insert_after, new_xml, nth=args.after_nth)
@@ -531,8 +539,16 @@ def main() -> None:
         else:
             content = insert_before_closing_sec(content, xml)
 
-    write_section(args.unpacked_dir, content)
-    print("OK: section0.xml updated", file=sys.stderr)
+    if args.dry_run:
+        original = read_section(args.unpacked_dir)
+        if content == original:
+            print("DRY-RUN: No changes detected", file=sys.stderr)
+        else:
+            diff_bytes = len(content.encode("utf-8")) - len(original.encode("utf-8"))
+            print(f"DRY-RUN: +{diff_bytes} bytes would be written (file NOT modified)", file=sys.stderr)
+    else:
+        write_section(args.unpacked_dir, content)
+        print("OK: section0.xml updated", file=sys.stderr)
 
 
 if __name__ == "__main__":
