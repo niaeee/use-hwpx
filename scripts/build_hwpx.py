@@ -27,9 +27,13 @@ Usage:
 
     # With placeholder replacement
     python build_hwpx.py --template gonmun --replace "수신자=OO학교장" --replace "제목=업무협조" --output result.hwpx
+
+    # Replace report drawText title
+    python build_hwpx.py --template report --replace-title "AI 활용 업무보고" --output report.hwpx
 """
 
 import argparse
+import re
 import shutil
 import sys
 import tempfile
@@ -80,7 +84,11 @@ def parse_replacements(raw: list[str] | None) -> dict[str, str]:
 
 
 def replace_placeholders(section_path: Path, replacements: dict[str, str]) -> list[str]:
-    """Replace {{KEY}} placeholders in section0.xml. Returns list of replaced keys."""
+    """Replace {{KEY}} placeholders in section0.xml.
+
+    This uses string-based replacement which works everywhere including
+    inside drawText elements. Returns list of replaced keys.
+    """
     if not replacements:
         return []
 
@@ -103,6 +111,31 @@ def replace_placeholders(section_path: Path, replacements: dict[str, str]) -> li
         )
 
     return replaced
+
+
+def replace_drawtext_title(section_path: Path, new_title: str) -> bool:
+    """Replace the title inside drawText (report template).
+
+    The report template has a drawText rect element containing the title
+    (default: "HY헤드라인M"). This replaces that text with new_title.
+
+    Returns True if replacement was made.
+    """
+    content = section_path.read_text(encoding="utf-8")
+    pattern = r'(<hp:drawText[^>]*>.*?<hp:t>)(.*?)(</hp:t>.*?</hp:drawText>)'
+    m = re.search(pattern, content, re.DOTALL)
+    if m:
+        old_title = m.group(2)
+        content = content[:m.start(2)] + new_title + content[m.end(2):]
+        section_path.write_text(content, encoding="utf-8")
+        print(
+            f"  Replaced drawText title: '{old_title}' -> '{new_title}'",
+            file=sys.stderr,
+        )
+        return True
+    else:
+        print("WARNING: drawText title not found in section0.xml", file=sys.stderr)
+        return False
 
 
 def validate_xml(filepath: Path) -> None:
@@ -226,6 +259,7 @@ def build(
     creator: str | None,
     output: Path,
     replacements: dict[str, str] | None = None,
+    replace_title: str | None = None,
 ) -> None:
     """Main build logic."""
 
@@ -286,8 +320,8 @@ def build(
             shutil.copy2(section_override, work / "Contents" / "section0.xml")
 
         # 4. Replace placeholders in section0.xml
+        section_file = work / "Contents" / "section0.xml"
         if replacements:
-            section_file = work / "Contents" / "section0.xml"
             replaced = replace_placeholders(section_file, replacements)
             if replaced:
                 print(
@@ -295,6 +329,10 @@ def build(
                     f"{', '.join('{{' + k + '}}' for k in replaced)}",
                     file=sys.stderr,
                 )
+
+        # 4-1. Replace drawText title (report template)
+        if replace_title:
+            replace_drawtext_title(section_file, replace_title)
 
         # 5. Update metadata
         update_metadata(work / "Contents" / "content.hpf", title, creator)
@@ -359,6 +397,11 @@ def main() -> None:
         help="Replace {{KEY}} with VALUE in section0.xml (repeatable)",
     )
     parser.add_argument(
+        "--replace-title",
+        metavar="TEXT",
+        help="Replace the drawText title in report template (default: 'HY헤드라인M')",
+    )
+    parser.add_argument(
         "--output", "-o",
         type=Path,
         required=True,
@@ -376,6 +419,7 @@ def main() -> None:
         creator=args.creator,
         output=args.output,
         replacements=replacements,
+        replace_title=args.replace_title,
     )
 
 
