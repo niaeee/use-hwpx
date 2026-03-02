@@ -150,7 +150,7 @@ def analyze_paraprops(root):
             ls_type = ls.get('type', 'PERCENT')
 
         margins = {}
-        for m_name in ['intent', 'left', 'right', 'prev', 'next']:
+        for m_name in ['indent', 'left', 'right', 'prev', 'next']:
             m = pp.find(f'.//hc:{m_name}', NS)
             if m is not None:
                 val = m.get('value', '0')
