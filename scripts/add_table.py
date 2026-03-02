@@ -352,11 +352,14 @@ def insert_table(
                 )
         else:
             close_pos = section_content.find("</hp:p>", anchor_pos)
-            if close_pos != -1:
-                insert_pos = close_pos + len("</hp:p>")
-                section_content = (
-                    section_content[:insert_pos] + table_xml + section_content[insert_pos:]
+            if close_pos == -1:
+                raise SystemExit(
+                    f"ERROR: No closing </hp:p> found after anchor '{insert_after}'."
                 )
+            insert_pos = close_pos + len("</hp:p>")
+            section_content = (
+                section_content[:insert_pos] + table_xml + section_content[insert_pos:]
+            )
     elif insert_before_sec_end:
         close_tag = "</hs:sec>"
         pos = section_content.rfind(close_tag)

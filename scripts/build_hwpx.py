@@ -97,7 +97,13 @@ def replace_placeholders(section_path: Path, replacements: dict[str, str]) -> li
     for key, value in replacements.items():
         placeholder = "{{" + key + "}}"
         if placeholder in content:
-            content = content.replace(placeholder, value)
+            safe_value = (
+                value.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+            )
+            content = content.replace(placeholder, safe_value)
             replaced.append(key)
 
     section_path.write_text(content, encoding="utf-8")

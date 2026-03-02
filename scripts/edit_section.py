@@ -394,8 +394,11 @@ def main() -> None:
 
         para_data = json.loads(args.paragraphs.read_text(encoding="utf-8"))
         new_xml = ""
-        for p in para_data:
+        requires_text = {"section_title", "body", "sub", "note"}
+        for i, p in enumerate(para_data):
             p_type = p.get("type", "text")
+            if p_type in requires_text and "text" not in p:
+                raise SystemExit(f"ERROR: paragraphs[{i}] type='{p_type}' requires 'text' field")
             if p_type == "section_title":
                 new_xml += make_section_title(p["text"])
             elif p_type == "body":
