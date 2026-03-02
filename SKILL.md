@@ -125,10 +125,9 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report --output report.hwp
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "작성일=2026. 3. 2.(월)" --replace "부서=총무과" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
-  --replace "섹션1 제목=추진 배경" --replace "본문 내용1=교육환경 개선 사업 추진" \
+  --replace "섹션1 제목=추진 배경" --replace "본문 내용=교육환경 개선 사업 추진" \
   --replace "세부 내용=노후 교실 리모델링" --replace "비고=예산 확보 완료" \
-  --replace "섹션2 제목=추진 계획" --replace "본문 내용2=현 교육환경 분석 결과" \
-  --replace "표 제목=세부 추진 일정" \
+  --replace "섹션2 제목=추진 계획" --replace "표 제목=세부 추진 일정" \
   --title "교육환경 개선 보고" --creator "총무과" --output report.hwpx
 
 # 커스텀 section0.xml 사용 (서식은 유지, 내용만 교체)
@@ -151,12 +150,12 @@ python3 "$SKILL_DIR/scripts/validate.py" report.hwpx
 | 4 | 12 | — | [PIC 로고(image2)] |
 | 5 | 12 | 13 | {{작성일}}  {{부서}} {{직위}} {{작성자}} ☏{{연락처}} |
 | 6 | 16 | 7/8 | 󰏚 {{섹션1 제목}} (HY헤드라인M 16pt) |
-| 7 | 17 | 9 | ❍ {{본문 내용1}} (휴먼명조 15pt) |
+| 7 | 17 | 9 | ❍ {{본문 내용}} (휴먼명조 15pt) |
 | 8 | 17 | 9 | - {{세부 내용}} (휴먼명조 15pt) |
 | 9 | 17 | 10 | ※ {{비고}} (중고딕 13pt) |
-| 10 | 17 | 7/8 | 󰏚 {{섹션2 제목}} (HY헤드라인M 16pt) ← header id=1 중첩 |
-| 11 | 17 | 9 | ❍ {{본문 내용2}} (휴먼명조 15pt) |
-| 12 | 17 | 9 | ❍ {{표 제목}} + **[footer 중첩]** + [TABLE 2x2] + [PIC 구분선(image3)] |
+| 10 | 17 | 7/8 | 󰏚 {{섹션2 제목}} (HY헤드라인M 16pt) |
+| 11 | 17 | 9 | ❍ {{본문 내용}} (휴먼명조 15pt) |
+| 12 | 17 | 9 | ❍ {{표 제목}} + [TABLE 2x2] + [PIC 구분선(image3)] |
 
 ### BinData (이미지) 구조
 
@@ -518,8 +517,7 @@ rm -f "$SECTION"
 | {{작성자}} | report | 작성자 성명 |
 | {{연락처}} | report | 연락처 전화번호 |
 | {{섹션1 제목}}, {{섹션2 제목}} | report | 각 섹션 제목 |
-| {{본문 내용1}} | report | 섹션1 본문 (추진 배경 등) |
-| {{본문 내용2}} | report | 섹션2 본문 (현황 등) |
+| {{본문 내용}} | report | 본문 (2회 사용, 동일 값 치환) |
 | {{세부 내용}} | report | 세부 사항 |
 | {{비고}} | report | 참고/비고 |
 | {{표 제목}} | report | 표 앞 설명 |
@@ -545,8 +543,8 @@ rm -f "$SECTION"
 | 스크립트 | 용도 |
 |----------|------|
 | `scripts/build_hwpx.py` | **핵심** — 템플릿 + XML → HWPX 조립 (BinData/content.hpf 자동 오버레이, `--replace-title` 지원) |
-| `scripts/edit_section.py` | section0.xml 문자열 기반 안전 편집 (drawText 포함, `--after-nth`, `--replace-body`, lxml 사용 금지) |
-| `scripts/add_table.py` | section0.xml에 HWPX 표 안전 삽입 (앵커 미발견 시 에러 종료, `--fallback-append`, 디버그 출력) |
+| `scripts/edit_section.py` | section0.xml 문자열 기반 안전 편집 (drawText 포함, lxml 사용 금지) |
+| `scripts/add_table.py` | section0.xml에 HWPX 표 안전 삽입 (header.xml 스타일 자동 추가) |
 | `scripts/add_style.py` | header.xml에 charPr/paraPr/borderFill/font 안전 추가 (itemCnt 자동 갱신) |
 | `scripts/analyze_template.py` | HWPX 심층 분석 (레퍼런스 기반 생성) |
 | `scripts/office/unpack.py` | HWPX → 디렉토리 (XML pretty-print) |
@@ -587,11 +585,6 @@ rm -f "$SECTION"
 14. **report 제목은 drawText 내부**: report 템플릿의 제목은 일반 `<hp:t>` 문단이 아니라 drawText 도형 내부에 있음. `--replace-title` 옵션 또는 `edit_section.py --replace-title` 사용
 15. **linesegarray 제거 필수**: `--replace`로 텍스트 길이가 변경되면 `<hp:linesegarray>` 레이아웃 캐시가 무효화되어 글자 겹침 발생. `build_hwpx.py`는 `--replace` 후 자동 제거. 수동 편집 시에도 반드시 제거할 것
 16. **표 treatAsChar="0"**: 표의 `<hp:pos treatAsChar="0">`을 사용. `treatAsChar="1"`(인라인)은 앞 문단과 같은 줄에 배치되어 여백이 비정상적으로 넓어지는 문제 발생
-17. **앵커 고유성**: `edit_section.py`와 `add_table.py`의 `--after` 앵커는 문서 내 고유한 전체 텍스트를 사용할 것. 부분 문자열이나 중복 가능한 텍스트 사용 금지. 나쁜 예: `--after "역량 강화"` / 좋은 예: `--after "  ❍ 월별 운영 내역"`
-18. **표 삽입 순서**: 표를 2개 이상 삽입할 때는 문서 위쪽부터 아래쪽 순서로 삽입. 각 삽입 후 grep으로 위치 확인
-19. **footer 포함 문단 삭제 금지**: report 템플릿의 `{{표 제목}}` 문단에는 `<hp:ctrl><hp:footer>` 컨트롤이 중첩되어 있다. 이 문단을 regex로 삭제하면 XML 구조가 깨진다. 내용 수정은 `--replace-body` 또는 `<hp:t>` 텍스트 치환으로만 수행
-20. **pack 전 XML 검증**: repack 전에 반드시 `lxml.etree.parse()`로 section0.xml 유효성을 확인할 것. pack 후 `validate.py`만으로는 XML 오류 원인 파악이 어렵다
-21. **add_table.py 앵커 실패 시**: 앵커를 찾지 못하면 에러로 종료된다 (문서 끝 자동 삽입 안 함). `--fallback-append`를 명시적으로 지정해야만 문서 끝 삽입 허용
 
 ---
 
@@ -649,24 +642,6 @@ content = re.sub(r'\s*<hp:linesegarray>.*?</hp:linesegarray>', '', content, flag
 - report 템플릿의 section0.xml에는 secPr 문단, 머리글 이미지(container+rect+pic), 헤더/푸터 5개, drawText 도형 등 복잡한 구조가 있다
 - 커스텀 section0.xml 사용 시 원본의 앞부분(secPr~로고)과 뒷부분(footer)을 반드시 보존
 - 가장 안전한 방법: 기본 빌드 → unpack → 문자열 편집 → repack
-
-### 10. report 본문 문단을 regex로 통째로 삭제하지 마라
-- report 템플릿의 일부 `<hp:p>` 문단 내부에 `<hp:ctrl><hp:footer>`가 중첩됨
-- 특히 `{{표 제목}}` 문단에 footer 컨트롤이 포함되어 있음
-- `re.search(r'<hp:p[^>]*>.*?</hp:p>', ...)` 매칭 후 삭제하면 footer의 닫힘 태그가 고아로 남아 "tag mismatch" 오류 발생
-- 문단 삭제 대신 `<hp:t>` 텍스트만 치환할 것 (`edit_section.py --replace-body` 사용)
-
-### 11. 동일 텍스트를 짧은 부분 문자열로 앵커 지정하지 마라
-- "역량 강화"처럼 문서 내 여러 곳에 존재할 수 있는 짧은 문자열은 첫 번째 매치에 삽입되어 의도하지 않은 위치에 내용이 추가됨
-- 앵커는 해당 문단의 전체 텍스트 또는 고유한 긴 문자열 사용
-- 불가피하게 중복되는 경우 `--after-nth N` 옵션으로 N번째 매치 지정
-- 나쁜 예: `--after "역량 강화"` / 좋은 예: `--after "  ❍ 월별 운영 내역"`
-
-### 12. add_table.py의 에러를 무시하지 마라
-- 앵커를 찾지 못하면 에러로 종료된다 (exit code 1)
-- 이전에는 WARNING만 출력하고 문서 맨 끝에 삽입하여 레이아웃 오류의 주범이었음
-- 에러 발생 시 앵커 텍스트를 수정하여 재시도
-- 의도적으로 문서 끝에 삽입하려면 `--fallback-append` 명시 필요
 
 ---
 
@@ -737,10 +712,9 @@ source "$VENV"
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "작성일=2026. 3. 2.(월)" --replace "부서=교육혁신과" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
-  --replace "섹션1 제목=추진 배경" --replace "본문 내용1=AI 활용 교육 추진" \
+  --replace "섹션1 제목=추진 배경" --replace "본문 내용=AI 활용 교육 추진" \
   --replace "세부 내용=교실 수업 적용" --replace "비고=예산 확보 완료" \
-  --replace "섹션2 제목=추진 계획" --replace "본문 내용2=현황 분석 결과" \
-  --replace "표 제목=세부 추진 일정" \
+  --replace "섹션2 제목=추진 계획" --replace "표 제목=세부 추진 일정" \
   --replace-title "AI 활용 업무보고" \
   --title "AI 활용 업무보고" --creator "교육혁신과" --output report.hwpx
 
@@ -955,110 +929,6 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
 - `edit_section.py`의 앵커 검색은 표 내부 매치를 자동 건너뜀 (Anti-pattern #9)
 - 플레이스홀더 치환 후 linesegarray가 자동 제거됨 (Critical Rule #15)
 - 새 섹션 제목은 `make_section_title()`로 올바른 U+F03DA 기호 사용
-- 앵커는 반드시 문서 내 고유한 문자열 사용 (Critical Rule #17). 중복 시 `--after-nth N` 사용
-- `add_table.py` 앵커 미발견 시 에러로 종료됨 (Critical Rule #21). `--fallback-append` 없이는 문서 끝 삽입 불가
-- pack 전 `lxml.etree.parse()`로 section0.xml 유효성 사전 검증 권장 (Critical Rule #20)
-
-### report footer 중첩 구조 경고
-
-report 템플릿의 `{{표 제목}}` 문단(`<hp:p id="0" paraPrIDRef="17" ...>`)은 footer 컨트롤을 내포하고 있다:
-
-```
-<hp:p ...>
-  <hp:run charPrIDRef="9">
-    <hp:ctrl>
-      <hp:footer id="1" applyPageType="BOTH">
-        <hp:subList ...>
-          <hp:p ...>  ← footer 내부 문단 (표+이미지 포함)
-          </hp:p>
-        </hp:subList>
-      </hp:footer>
-    </hp:ctrl>
-    <hp:t>  ❍ {{표 제목}}</hp:t>  ← 실제 텍스트는 여기
-  </hp:run>
-</hp:p>
-```
-
-이 문단을 통째로 삭제하면 `</hp:subList></hp:footer></hp:ctrl>` 닫힘 태그가 고아로 남아 XML 파싱 오류가 발생한다. **내용만 수정하고 문단 자체는 삭제하지 말 것.** `edit_section.py --replace-body` 사용 권장.
-
-마찬가지로, `{{섹션2 제목}}` 문단 내부에도 `<hp:header id="1">` 컨트롤이 중첩되어 있으므로 해당 문단도 삭제 불가.
-
-### 다중 표 삽입 워크플로우
-
-표를 2개 이상 삽입할 때는 반드시:
-
-1. **문서 위쪽 표부터 아래쪽 표 순서로 삽입** — 앞쪽 삽입이 뒤쪽 위치를 밀어내므로
-2. **각 표 삽입 후 grep으로 표 위치 확인**:
-   ```bash
-   grep -oP '(?<=<hp:t>)[^<]+' ./unpacked/Contents/section0.xml | head -30
-   ```
-3. **앵커 텍스트는 문서 내 고유한 값 사용** (짧은 부분 문자열 지양)
-4. **삽입 결과의 디버그 정보 확인**: `add_table.py`는 삽입 위치의 직전/직후 텍스트를 출력
-
-### report 6섹션 + 표 2개 완전 워크플로우
-
-```bash
-source "$VENV"
-
-# 1단계: 기본 빌드 (섹션1, 섹션2만 플레이스홀더 치환)
-python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
-  --replace "작성일=2025. 12. 31.(수)" \
-  --replace "부서=정책기획팀" --replace "직위=주무관" \
-  --replace "작성자=이홍우" --replace "연락처=210-5665" \
-  --replace "섹션1 제목=추진 배경" \
-  --replace "본문 내용1=핵심 배경 설명" \
-  --replace "세부 내용=상세 설명" \
-  --replace "비고=관련 근거" \
-  --replace "섹션2 제목=현황" \
-  --replace "본문 내용2=현황 요약" \
-  --replace "표 제목=동아리 개요" \
-  --replace-title "보고서 제목" \
-  --output report.hwpx
-
-# 2단계: unpack
-python3 "$SKILL_DIR/scripts/office/unpack.py" report.hwpx ./unpacked/
-
-# 3단계: 추가 섹션 삽입 (순서대로, 고유한 앵커 사용)
-E="python3 $SKILL_DIR/scripts/edit_section.py ./unpacked/"
-$E --add-section-title "추진 근거" --after "관련 근거"
-$E --add-body "근거 항목1" --after "추진 근거"
-
-$E --add-section-title "운영 실적" --after "동아리 개요"
-$E --add-body "실적 요약" --after "운영 실적"
-$E --add-body "월별 운영 내역" --after "실적 요약"
-
-$E --add-section-title "주요 성과" --after "월별 운영 내역"
-$E --add-body "성과 항목1" --after "주요 성과"
-
-$E --add-section-title "향후 계획" --after "성과 항목1"
-$E --add-body "계획 항목1" --after "향후 계획"
-
-# 4단계: 표 삽입 (위에서 아래 순서로!)
-# 표1: 동아리 개요 (현황 섹션)
-python3 "$SKILL_DIR/scripts/add_table.py" ./unpacked/ \
-  --data /tmp/overview_table.json --insert-after "동아리 개요" --body-width 48190
-
-# 표2: 월별 운영 실적 (운영 실적 섹션)
-python3 "$SKILL_DIR/scripts/add_table.py" ./unpacked/ \
-  --data /tmp/monthly_table.json --insert-after "월별 운영 내역" --body-width 48190
-
-# 5단계: 삽입 결과 확인
-grep -oP '(?<=<hp:t>)[^<]+' ./unpacked/Contents/section0.xml | grep -v '^\s*$'
-
-# 6단계: XML 유효성 검증 (pack 전에 반드시!)
-python3 -c "
-from lxml import etree
-with open('./unpacked/Contents/section0.xml','rb') as f: etree.parse(f)
-print('XML valid')
-"
-
-# 7단계: pack + 최종 검증
-python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
-python3 "$SKILL_DIR/scripts/validate.py" report_final.hwpx
-
-# 정리
-rm -rf ./unpacked/
-```
 
 ---
 
@@ -1099,10 +969,9 @@ rm -rf ./unpacked/
 # 6-섹션 보고서 (배경, 현황, 추진계획, 기대효과, 행정사항, 향후계획)
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
   --replace "섹션1 제목=추진 배경" \
-  --replace "본문 내용1=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
+  --replace "본문 내용=AI 기반 맞춤형 교육 서비스 확대를 위한 기반 구축 필요" \
   --replace "세부 내용=교육부 '2026년 AI 디지털 교육 활성화 계획' 시행" \
   --replace "섹션2 제목=현황 및 추진 계획" \
-  --replace "본문 내용2=AI 디지털 교육 현황" \
   --replace "표 제목=연도별 추진 일정" \
   --replace-title "AI 디지털 교육 활성화 보고" \
   --output report.hwpx

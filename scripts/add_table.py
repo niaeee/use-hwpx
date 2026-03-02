@@ -40,7 +40,6 @@ table_data.json format:
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -283,31 +282,11 @@ def generate_table_xml(
     return para_xml
 
 
-def _extract_context(content: str, pos: int, chars: int = 40) -> str:
-    """Extract surrounding text context at a position for debug output."""
-    # Find nearby <hp:t> content for readable context
-    # Look backward for text
-    before_area = content[max(0, pos - 500):pos]
-    after_area = content[pos:pos + 500]
-
-    before_texts = []
-    for m in re.finditer(r'<hp:t>([^<]+)</hp:t>', before_area):
-        before_texts.append(m.group(1))
-    after_texts = []
-    for m in re.finditer(r'<hp:t>([^<]+)</hp:t>', after_area):
-        after_texts.append(m.group(1))
-
-    before_str = before_texts[-1][:chars] if before_texts else "(no text)"
-    after_str = after_texts[0][:chars] if after_texts else "(no text)"
-    return f'before="{before_str}" / after="{after_str}"'
-
-
 def insert_table(
     unpacked_dir: Path,
     table_data: dict,
     insert_after: str | None = None,
     insert_before_sec_end: bool = False,
-    fallback_append: bool = False,
     font_name: str = "맑은 고딕",
     font_size: int = 1000,
     header_bg: str = "#DCDCDC",
@@ -321,7 +300,6 @@ def insert_table(
         table_data: Table data dict (columns, rows, etc.)
         insert_after: Anchor text to insert table after
         insert_before_sec_end: If True, insert before </hs:sec>
-        fallback_append: If True, append to end when anchor not found (default: error)
         font_name: Font name (default: "맑은 고딕")
         font_size: Font size in HWPUNIT (1000 = 10pt)
         header_bg: Header background color (default: "#DCDCDC")
@@ -357,29 +335,14 @@ def insert_table(
     section_path = unpacked_dir / "Contents" / "section0.xml"
     section_content = section_path.read_text(encoding="utf-8")
 
-    insert_pos = -1
-
     if insert_after:
         # Find anchor outside <hp:tbl> blocks to avoid matching inside tables
         anchor_pos = _find_anchor_outside_table(section_content, insert_after)
         if anchor_pos == -1:
-            if fallback_append:
-                print(
-                    f"WARNING: Anchor text '{insert_after}' not found. "
-                    f"Appending to document end (--fallback-append).",
-                    file=sys.stderr,
-                )
-                close_tag = "</hs:sec>"
-                pos = section_content.rfind(close_tag)
-                section_content = section_content[:pos] + table_xml + section_content[pos:]
-                insert_pos = pos
-            else:
-                raise SystemExit(
-                    f"ERROR: Anchor text '{insert_after}' not found (outside tables).\n"
-                    f"  The table was NOT inserted.\n"
-                    f"  Fix the anchor text and retry, or use --fallback-append to force "
-                    f"insertion at document end."
-                )
+            print(f"WARNING: Anchor text '{insert_after}' not found (outside tables)", file=sys.stderr)
+            close_tag = "</hs:sec>"
+            pos = section_content.rfind(close_tag)
+            section_content = section_content[:pos] + table_xml + section_content[pos:]
         else:
             close_pos = section_content.find("</hp:p>", anchor_pos)
             if close_pos != -1:
@@ -391,17 +354,10 @@ def insert_table(
         close_tag = "</hs:sec>"
         pos = section_content.rfind(close_tag)
         section_content = section_content[:pos] + table_xml + section_content[pos:]
-        insert_pos = pos
     else:
         raise SystemExit("ERROR: Specify --insert-after or use --append")
 
     section_path.write_text(section_content, encoding="utf-8")
-
-    # Debug: show insertion context
-    if insert_pos >= 0:
-        ctx = _extract_context(section_content, insert_pos, chars=40)
-        print(f"  Insert position: {ctx}", file=sys.stderr)
-
     print(
         f"OK: Table inserted ({total_cols} cols x {total_rows} rows, "
         f"font={font_name} {font_size // 100}pt, 자간={spacing}%, "
@@ -440,10 +396,6 @@ def main() -> None:
         "--append", action="store_true",
         help="Append table before </hs:sec> (if --insert-after not given)",
     )
-    parser.add_argument(
-        "--fallback-append", action="store_true",
-        help="If --insert-after anchor not found, append to document end instead of error",
-    )
     args = parser.parse_args()
 
     if not args.data.is_file():
@@ -467,7 +419,6 @@ def main() -> None:
         table_data,
         insert_after=insert_after,
         insert_before_sec_end=insert_before_sec_end,
-        fallback_append=args.fallback_append,
         font_name=args.font,
         font_size=args.font_size * 100,
         header_bg=args.header_bg,
