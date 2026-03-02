@@ -83,6 +83,16 @@ def parse_replacements(raw: list[str] | None) -> dict[str, str]:
     return result
 
 
+def _escape_xml(text: str) -> str:
+    """Escape XML special characters."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def replace_placeholders(section_path: Path, replacements: dict[str, str]) -> list[str]:
     """Replace {{KEY}} placeholders in section0.xml.
 
@@ -97,13 +107,7 @@ def replace_placeholders(section_path: Path, replacements: dict[str, str]) -> li
     for key, value in replacements.items():
         placeholder = "{{" + key + "}}"
         if placeholder in content:
-            safe_value = (
-                value.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace('"', "&quot;")
-            )
-            content = content.replace(placeholder, safe_value)
+            content = content.replace(placeholder, _escape_xml(value))
             replaced.append(key)
 
     section_path.write_text(content, encoding="utf-8")

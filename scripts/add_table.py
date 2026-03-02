@@ -21,6 +21,13 @@ Usage:
         --font "맑은 고딕" --font-size 10 \
         --header-bg "#DCDCDC"
 
+    # Append to document end
+    python add_table.py <unpacked_dir> --data table.json --append
+
+    # Insert after anchor, fallback to end if not found
+    python add_table.py <unpacked_dir> --data table.json \
+        --insert-after "앵커" --fallback-append
+
 table_data.json format:
 {
     "columns": ["분류", "항목", "2024년", "2025년", "2026년"],
@@ -76,17 +83,31 @@ def _escape_xml(text: str) -> str:
     )
 
 
-def _find_anchor_outside_table(content: str, anchor_text: str) -> int:
-    """Find anchor_text position that is NOT inside a <hp:tbl> block."""
+def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> int:
+    """Find nth occurrence of anchor_text that is NOT inside a <hp:tbl> block."""
+    matches = []
     start = 0
     while True:
         pos = content.find(anchor_text, start)
         if pos == -1:
-            return -1
+            break
         before = content[:pos]
         if before.count("<hp:tbl ") <= before.count("</hp:tbl>"):
-            return pos
+            matches.append(pos)
         start = pos + len(anchor_text)
+
+    if not matches:
+        return -1
+    if len(matches) > 1 and nth == 1:
+        print(
+            f"WARNING: '{anchor_text}' found {len(matches)} times outside tables. "
+            f"Using 1st match.",
+            file=sys.stderr,
+        )
+    if nth > len(matches):
+        print(f"WARNING: nth={nth} but only {len(matches)} match(es) found", file=sys.stderr)
+        return -1
+    return matches[nth - 1]
 
 
 def generate_table_xml(

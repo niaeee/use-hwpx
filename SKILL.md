@@ -584,9 +584,9 @@ rm -f "$SECTION"
 10. **레퍼런스**: 상세 XML 구조는 `$SKILL_DIR/references/hwpx-format.md` 참조
 11. **build_hwpx.py 우선**: 새 문서 생성은 build_hwpx.py 사용 (python-hwpx API 직접 호출 지양)
 12. **빈 줄**: `<hp:t/>` 사용 (self-closing tag)
-13. **lxml로 section0.xml 파싱 금지**: lxml은 footer, tbl, header 등 원본 XML 구조를 파괴한다. 반드시 **문자열 기반(str.replace, re.sub)** 방식으로 편집하거나 `edit_section.py` 사용
+13. **lxml로 section0.xml 파싱 금지**: lxml은 footer, tbl, header 등 원본 XML 구조를 파괴한다. 반드시 **문자열 기반(str.replace, re.sub)** 방식으로 편집하거나 `edit_section.py` 사용 (→ Anti-pattern #1 참조)
 14. **report 제목은 drawText 내부**: report 템플릿의 제목은 일반 `<hp:t>` 문단이 아니라 drawText 도형 내부에 있음. `--replace-title` 옵션 또는 `edit_section.py --replace-title` 사용
-15. **linesegarray 제거 필수**: `--replace`로 텍스트 길이가 변경되면 `<hp:linesegarray>` 레이아웃 캐시가 무효화되어 글자 겹침 발생. `build_hwpx.py`는 `--replace` 후 자동 제거. 수동 편집 시에도 반드시 제거할 것
+15. **linesegarray 제거 필수**: `--replace`로 텍스트 길이가 변경되면 `<hp:linesegarray>` 레이아웃 캐시가 무효화되어 글자 겹침 발생. `build_hwpx.py`는 자동 제거. 수동 편집 시 `re.sub(r'\s*<hp:linesegarray>.*?</hp:linesegarray>', '', content, flags=re.DOTALL)` (→ Anti-pattern #8 참조)
 16. **표 treatAsChar="0"**: 표의 `<hp:pos treatAsChar="0">`을 사용. `treatAsChar="1"`(인라인)은 앞 문단과 같은 줄에 배치되어 여백이 비정상적으로 넓어지는 문제 발생
 17. **앵커 텍스트 고유성**: 동일 텍스트가 여러 곳에 있으면 의도와 다른 위치에 삽입됨. 다중 매치 시 `--after-nth N`으로 N번째 매치 지정. 짧은 부분문자열(예: "계획") 대신 고유한 전체 문구 사용
 18. **add_table.py 앵커 필수**: 앵커 텍스트를 찾지 못하면 ERROR로 중단. 문서 끝 삽입이 의도적이면 `--fallback-append` 명시
@@ -597,10 +597,8 @@ rm -f "$SECTION"
 ## Anti-patterns (절대 하면 안 되는 것)
 
 ### 1. lxml로 section0.xml을 파싱하지 마라
-- lxml 파싱은 footer, tbl, header 등 원본 XML 구조를 파괴한다
-- report 템플릿 원본: `tbl 2개, footer 2개, header 12개` → lxml 파싱 후: `tbl 0개, footer 0개` → 구조 깨짐
-- 반드시 **문자열 기반(str.replace, re.sub)** 방식으로 편집
-- 복잡한 편집이 필요하면 `edit_section.py` 사용
+- report 원본: `tbl 2개, footer 2개, header 12개` → lxml 파싱 후: `tbl 0개, footer 0개`
+- 반드시 **문자열 기반** 편집 또는 `edit_section.py` 사용
 
 ### 2. charPr 복사 시 regex로 속성값을 일괄 치환하지 마라
 - `re.sub(r'hangul="\d+"', 'hangul="6"', block)` 같은 패턴은 fontRef뿐 아니라 ratio, spacing, relSz의 값까지 변경한다
@@ -631,30 +629,21 @@ correct = '\U000F03DA'  # U+F03DA (4바이트, Supplementary PUA-B) ← 정상
 
 ### 7. report 템플릿의 secPr/머리글/footer 구조를 누락하지 마라
 ### 8. linesegarray를 남겨두지 마라
-- `<hp:linesegarray>`는 한글이 저장 시 생성하는 **문자별 위치 레이아웃 캐시**
-- `--replace`로 텍스트 길이가 바뀌면 이 캐시가 원래 길이 기준이라 **글자가 겹치거나 잘림**
-- `build_hwpx.py`는 `--replace` 후 자동으로 제거 (`re.sub`으로 전체 블록 삭제)
-- 수동으로 section0.xml을 편집한 경우에도 반드시 제거:
-```python
-content = re.sub(r'\s*<hp:linesegarray>.*?</hp:linesegarray>', '', content, flags=re.DOTALL)
-```
-- 한글 프로그램은 linesegarray가 없으면 열 때 자동 재계산하므로 삭제해도 안전
-
-### 10. 짧은 앵커 텍스트를 사용하지 마라
-- "계획", "현황" 같은 짧은 단어는 문서 내 여러 곳에 존재할 수 있어 의도와 다른 위치에 삽입됨
-- 전체 문구(예: "연도별 추진 일정", "추진 배경") 사용. 다중 매치 시 `--after-nth N` 활용
-
-### 11. add_table.py 앵커 에러를 무시하지 마라
-- 앵커 미발견 시 ERROR로 중단됨 (이전에는 WARNING+문서 끝 삽입이었으나 수정됨)
-- 의도적 문서 끝 삽입은 `--fallback-append` 또는 `--append` 사용
+- 텍스트 길이 변경 후 캐시가 남으면 **글자 겹침/잘림** 발생
+- `build_hwpx.py`는 자동 제거. 수동 편집 시에도 반드시 제거 (Critical Rule #15 참조)
 
 ### 9. 앵커 텍스트가 표 안에도 있을 수 있다 — 표 밖 매치만 사용하라
-- `insert_after_anchor("세부 추진 일정", ...)` 호출 시, 해당 텍스트가 표 셀 안에도 존재할 수 있음
-- 표 내부 `<hp:tbl>...<hp:t>세부 추진 일정</hp:t>...</hp:tbl>` 위치에 삽입하면 표 구조가 깨짐
-- `edit_section.py`와 `add_table.py`는 `_find_anchor_outside_table()`로 표 밖 매치만 사용
-- 직접 `content.find()`를 쓸 때도 반드시 해당 위치가 `<hp:tbl>` 내부인지 확인
-- report 템플릿의 section0.xml에는 secPr 문단, 머리글 이미지(container+rect+pic), 헤더/푸터 5개, drawText 도형 등 복잡한 구조가 있다
-- 커스텀 section0.xml 사용 시 원본의 앞부분(secPr~로고)과 뒷부분(footer)을 반드시 보존
+- `edit_section.py`와 `add_table.py`는 `_find_anchor_outside_table()`로 자동 처리
+- 직접 `content.find()`를 쓸 때도 반드시 `<hp:tbl>` 내부인지 확인
+
+### 10. 짧은 앵커 텍스트를 사용하지 마라
+- "계획", "현황" 같은 짧은 단어는 다중 매치 위험. 전체 문구 사용, 다중 매치 시 `--after-nth N` 활용
+
+### 11. add_table.py 앵커 에러를 무시하지 마라
+- 앵커 미발견 시 ERROR 중단. 의도적 문서 끝 삽입은 `--fallback-append` 또는 `--append` 사용
+
+### 12. report 템플릿 구조를 훼손하지 마라
+- secPr, 머리글 이미지, footer 등 복잡한 구조가 있으므로 원본의 앞부분(secPr~로고)과 뒷부분(footer)을 반드시 보존
 - 가장 안전한 방법: 기본 빌드 → unpack → 문자열 편집 → repack
 
 ---
@@ -941,9 +930,10 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
 
 ### 주의사항
 
-- `edit_section.py`의 앵커 검색은 표 내부 매치를 자동 건너뜀 (Anti-pattern #9)
+- 앵커 검색은 표 내부 매치를 자동 건너뜀 (Anti-pattern #9)
+- 동일 앵커가 여러 곳에 있으면 `--after-nth N`으로 N번째 매치 지정 (예: `--after "추진 계획" --after-nth 2`)
+- `add_table.py`에서 앵커를 못 찾으면 ERROR. 의도적 문서 끝 삽입은 `--fallback-append` 사용
 - 플레이스홀더 치환 후 linesegarray가 자동 제거됨 (Critical Rule #15)
-- 새 섹션 제목은 `make_section_title()`로 올바른 U+F03DA 기호 사용
 
 ---
 
