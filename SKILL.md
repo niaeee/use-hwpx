@@ -125,7 +125,7 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report --output report.hwp
 
 # 플레이스홀더 치환 + 메타데이터
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
-  --replace "작성일=2026. 3. 2.(월)" --replace "부서=총무과" \
+  --replace "작성일=2026. 3. 2.(월)" --replace "부서명=총무과" --replace "팀명=총무팀" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
   --replace "섹션1 제목=추진 배경" --replace "본문 내용1=교육환경 개선 사업 추진" \
   --replace "세부 내용=노후 교실 리모델링" --replace "비고=예산 확보 완료" \
@@ -151,7 +151,7 @@ python3 "$SKILL_DIR/scripts/validate.py" report.hwpx
 | 2 | 14 | — | 빈 줄 |
 | 3 | 19 | 13 | (공백) |
 | 4 | 12 | — | [PIC 로고(image2)] |
-| 5 | 12 | 13 | {{작성일}}  {{부서}} {{직위}} {{작성자}} ☏{{연락처}} |
+| 5 | 12 | 13 | {{작성일}}  {{부서명}} {{팀명}} {{직위}} {{작성자}} ☏{{연락처}} |
 | 6 | 16 | 7/8 | 󰏚 {{섹션1 제목}} (HY헤드라인M 16pt) |
 | 7 | 17 | 9 | ❍ {{본문 내용1}} (휴먼명조 15pt) |
 | 8 | 17 | 9 | - {{세부 내용}} (휴먼명조 15pt) |
@@ -515,7 +515,8 @@ rm -f "$SECTION"
 | {{팩스번호}} | gonmun, draft | 팩스 번호 |
 | {{이메일}} | gonmun, draft | 이메일 주소 |
 | {{작성일}} | report | 보고 날짜 (예: 2026. 3. 2.(월)) |
-| {{부서}} | report | 작성 부서 |
+| {{부서명}} | report | 작성 부서(실·과 단위, 예: 정책관실) |
+| {{팀명}} | report | 작성 팀(팀 단위, 예: 정책기획팀) |
 | {{직위}} | report | 작성자 직위 |
 | {{작성자}} | report | 작성자 성명 |
 | {{연락처}} | report | 연락처 전화번호 |
@@ -725,7 +726,7 @@ source "$VENV"
 
 # 1. 기본 report 빌드
 python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
-  --replace "작성일=2026. 3. 2.(월)" --replace "부서=교육혁신과" \
+  --replace "작성일=2026. 3. 2.(월)" --replace "부서명=교육혁신과" --replace "팀명=교육혁신팀" \
   --replace "직위=주무관" --replace "작성자=홍길동" --replace "연락처=1234" \
   --replace "섹션1 제목=추진 배경" --replace "본문 내용1=AI 활용 교육 추진" \
   --replace "세부 내용=교실 수업 적용" --replace "비고=예산 확보 완료" \

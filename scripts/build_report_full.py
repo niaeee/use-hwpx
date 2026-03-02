@@ -12,7 +12,8 @@ Config JSON format:
   "meta": {
     "title": "보고서 제목",
     "date": "2026. 3. 2.(월)",
-    "department": "정책기획팀",
+    "department": "정책관실",
+    "team": "정책기획팀",
     "position": "교육협력담당관",
     "author": "작성자",
     "contact": "052-XXX-XXXX"
@@ -66,7 +67,8 @@ def build_report(config: dict, output: Path) -> None:
     # Meta → template replacements
     meta_map = {
         "작성일": meta.get("date", ""),
-        "부서": meta.get("department", ""),
+        "부서명": meta.get("department", ""),
+        "팀명": meta.get("team", ""),
         "직위": meta.get("position", ""),
         "작성자": meta.get("author", ""),
         "연락처": meta.get("contact", ""),
