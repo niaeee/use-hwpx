@@ -546,7 +546,7 @@ rm -f "$SECTION"
 | 스크립트 | 용도 |
 |----------|------|
 | `scripts/build_hwpx.py` | **핵심** — 템플릿 + XML → HWPX 조립 (BinData/content.hpf 자동 오버레이, `--replace-title` 지원) |
-| `scripts/edit_section.py` | section0.xml 문자열 기반 안전 편집 (drawText 포함, lxml 사용 금지) |
+| `scripts/edit_section.py` | section0.xml 문자열 기반 안전 편집 (drawText 포함, `--bulk-insert` 일괄 삽입, lxml 사용 금지) |
 | `scripts/add_table.py` | section0.xml에 HWPX 표 안전 삽입 (header.xml 스타일 자동 추가) |
 | `scripts/add_style.py` | header.xml에 charPr/paraPr/borderFill/font 안전 추가 (itemCnt 자동 갱신) |
 | `scripts/analyze_template.py` | HWPX 심층 분석 (레퍼런스 기반 생성) |
@@ -645,6 +645,10 @@ correct = '\U000F03DA'  # U+F03DA (4바이트, Supplementary PUA-B) ← 정상
 ### 12. report 템플릿 구조를 훼손하지 마라
 - secPr, 머리글 이미지, footer 등 복잡한 구조가 있으므로 원본의 앞부분(secPr~로고)과 뒷부분(footer)을 반드시 보존
 - 가장 안전한 방법: 기본 빌드 → unpack → 문자열 편집 → repack
+
+### 13. edit_section.py를 개별 호출로 반복하지 마라
+- 20회 이상 `--add-section-title`/`--add-body`를 개별 호출하면 앵커 충돌 위험
+- 다중 섹션은 반드시 `--bulk-insert sections.json` 사용 (한 번에 모든 문단을 삽입하여 앵커 충돌 원천 차단)
 
 ---
 
@@ -912,12 +916,20 @@ python3 "$SKILL_DIR/scripts/build_hwpx.py" --template report \
 # 2. unpack
 python3 "$SKILL_DIR/scripts/office/unpack.py" report.hwpx ./unpacked/
 
-# 3. 섹션 추가 (edit_section.py — 앵커 기반)
+# 3. 다중 섹션 일괄 삽입 (--bulk-insert 권장)
+cat > /tmp/sections.json << 'EOF'
+{
+  "insert_after": "추진 계획",
+  "paragraphs": [
+    {"type": "section_title", "text": "기대 효과"},
+    {"type": "body", "text": "AI 활용 수업 만족도 향상"},
+    {"type": "section_title", "text": "행정 사항"},
+    {"type": "body", "text": "(예산) 연간 2,318천원 한도"}
+  ]
+}
+EOF
 python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-section-title "향후 계획" --after "추진 계획"
-
-python3 "$SKILL_DIR/scripts/edit_section.py" ./unpacked/ \
-  --add-body "3월 중 시범운영 착수" --after "향후 계획"
+  --bulk-insert /tmp/sections.json
 
 # 4. 표 삽입 (필요 시)
 python3 "$SKILL_DIR/scripts/add_table.py" ./unpacked/ \
@@ -930,7 +942,8 @@ python3 "$SKILL_DIR/scripts/office/pack.py" ./unpacked/ report_final.hwpx
 
 ### 주의사항
 
-- 앵커 검색은 표 내부 매치를 자동 건너뜀 (Anti-pattern #9)
+- 다중 섹션은 `--bulk-insert`로 한 번에 삽입 (개별 호출 반복 시 앵커 충돌 위험, Anti-pattern #13)
+- 앵커 검색은 표/footer/header/drawText 내부 매치를 자동 건너뜀 (Anti-pattern #9)
 - 동일 앵커가 여러 곳에 있으면 `--after-nth N`으로 N번째 매치 지정 (예: `--after "추진 계획" --after-nth 2`)
 - `add_table.py`에서 앵커를 못 찾으면 ERROR. 의도적 문서 끝 삽입은 `--fallback-append` 사용
 - 플레이스홀더 치환 후 linesegarray가 자동 제거됨 (Critical Rule #15)

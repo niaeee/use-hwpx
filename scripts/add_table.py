@@ -54,6 +54,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from add_style import add_table_styles  # noqa: E402
+from edit_section import _find_toplevel_p_blocks  # noqa: E402
 
 # Template body widths
 BODY_WIDTH = {
@@ -83,8 +84,14 @@ def _escape_xml(text: str) -> str:
     )
 
 
+_NESTED_TAGS = [
+    ("<hp:tbl ", "</hp:tbl>"), ("<hp:footer ", "</hp:footer>"),
+    ("<hp:header ", "</hp:header>"), ("<hp:drawText ", "</hp:drawText>"),
+]
+
+
 def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> int:
-    """Find nth occurrence of anchor_text that is NOT inside a <hp:tbl> block."""
+    """Find nth occurrence of anchor_text NOT inside nested contexts."""
     matches = []
     start = 0
     while True:
@@ -92,7 +99,12 @@ def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> 
         if pos == -1:
             break
         before = content[:pos]
-        if before.count("<hp:tbl ") <= before.count("</hp:tbl>"):
+        nested = False
+        for otag, ctag in _NESTED_TAGS:
+            if before.count(otag) > before.count(ctag):
+                nested = True
+                break
+        if not nested:
             matches.append(pos)
         start = pos + len(anchor_text)
 
@@ -100,7 +112,7 @@ def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> 
         return -1
     if len(matches) > 1 and nth == 1:
         print(
-            f"WARNING: '{anchor_text}' found {len(matches)} times outside tables. "
+            f"WARNING: '{anchor_text}' found {len(matches)} times outside nested contexts. "
             f"Using 1st match.",
             file=sys.stderr,
         )
@@ -358,7 +370,6 @@ def insert_table(
     section_content = section_path.read_text(encoding="utf-8")
 
     if insert_after:
-        # Find anchor outside <hp:tbl> blocks to avoid matching inside tables
         anchor_pos = _find_anchor_outside_table(section_content, insert_after)
         if anchor_pos == -1:
             if fallback_append:
@@ -368,19 +379,25 @@ def insert_table(
                 section_content = section_content[:pos] + table_xml + section_content[pos:]
             else:
                 raise SystemExit(
-                    f"ERROR: Anchor text '{insert_after}' not found (outside tables).\n"
+                    f"ERROR: Anchor text '{insert_after}' not found (outside nested contexts).\n"
                     f"  Use --fallback-append to insert at document end instead."
                 )
         else:
-            close_pos = section_content.find("</hp:p>", anchor_pos)
-            if close_pos == -1:
-                raise SystemExit(
-                    f"ERROR: No closing </hp:p> found after anchor '{insert_after}'."
-                )
-            insert_pos = close_pos + len("</hp:p>")
-            section_content = (
-                section_content[:insert_pos] + table_xml + section_content[insert_pos:]
-            )
+            # Depth-aware: find top-level <hp:p> block containing anchor
+            inserted = False
+            for blk_start, blk_end in _find_toplevel_p_blocks(section_content):
+                if blk_start <= anchor_pos < blk_end:
+                    section_content = section_content[:blk_end] + table_xml + section_content[blk_end:]
+                    inserted = True
+                    break
+            if not inserted:
+                close_pos = section_content.find("</hp:p>", anchor_pos)
+                if close_pos == -1:
+                    raise SystemExit(
+                        f"ERROR: No closing </hp:p> found after anchor '{insert_after}'."
+                    )
+                insert_pos = close_pos + len("</hp:p>")
+                section_content = section_content[:insert_pos] + table_xml + section_content[insert_pos:]
     elif insert_before_sec_end:
         close_tag = "</hs:sec>"
         pos = section_content.rfind(close_tag)

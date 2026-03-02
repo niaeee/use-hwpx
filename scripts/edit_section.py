@@ -190,25 +190,31 @@ def make_note_paragraph(
     )
 
 
-def _is_inside_table(content: str, pos: int) -> bool:
-    """Check if position is inside a <hp:tbl>...</hp:tbl> block.
+# Nested context tags: anchor search skips matches inside these
+_NESTED_OPEN_CLOSE = [
+    ("<hp:tbl ", "</hp:tbl>"),
+    ("<hp:footer ", "</hp:footer>"),
+    ("<hp:header ", "</hp:header>"),
+    ("<hp:drawText ", "</hp:drawText>"),
+]
 
-    Counts <hp:tbl and </hp:tbl> tags before the position.
-    If open > close, the position is inside a table.
-    """
+
+def _is_inside_nested(content: str, pos: int) -> bool:
+    """Check if position is inside a nested context (table, footer, header, drawText)."""
     before = content[:pos]
-    open_count = before.count("<hp:tbl ")
-    close_count = before.count("</hp:tbl>")
-    return open_count > close_count
+    for open_tag, close_tag in _NESTED_OPEN_CLOSE:
+        if before.count(open_tag) > before.count(close_tag):
+            return True
+    return False
 
 
 def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> int:
-    """Find nth occurrence of anchor_text that is NOT inside a <hp:tbl> block.
+    """Find nth occurrence of anchor_text NOT inside nested contexts.
 
     Args:
         nth: 1-based index. If multiple matches exist and nth=1, warns about ambiguity.
 
-    Returns the position, or -1 if not found outside any table.
+    Returns the position, or -1 if not found.
     """
     matches = []
     start = 0
@@ -216,7 +222,7 @@ def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> 
         pos = content.find(anchor_text, start)
         if pos == -1:
             break
-        if not _is_inside_table(content, pos):
+        if not _is_inside_nested(content, pos):
             matches.append(pos)
         start = pos + len(anchor_text)
 
@@ -224,7 +230,7 @@ def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> 
         return -1
     if len(matches) > 1 and nth == 1:
         print(
-            f"WARNING: '{anchor_text}' found {len(matches)} times outside tables. "
+            f"WARNING: '{anchor_text}' found {len(matches)} times outside nested contexts. "
             f"Use --after-nth N to specify. Using 1st match.",
             file=sys.stderr,
         )
@@ -234,49 +240,86 @@ def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> 
     return matches[nth - 1]
 
 
-def insert_after_anchor(content: str, anchor_text: str, new_xml: str, nth: int = 1) -> str:
-    """Insert new XML after the paragraph containing anchor_text.
+def _find_toplevel_p_blocks(content: str) -> list[tuple[int, int]]:
+    """Find (start, end) of each top-level <hp:p>...</hp:p> block.
 
-    Finds the <hp:p> element containing anchor_text and inserts new_xml
-    after the closing </hp:p> tag. Skips matches inside <hp:tbl> blocks.
+    Top-level = depth-1 <hp:p> (direct child of <hs:sec>).
+    Returns list of (start_pos, end_pos) where end_pos points after </hp:p>.
+    """
+    blocks = []
+    p_depth = 0
+    block_start = -1
+    pos = 0
+    n = len(content)
+    while pos < n:
+        idx = content.find("<", pos)
+        if idx == -1:
+            break
+        if content[idx:idx + 7] == "</hp:p>":
+            p_depth -= 1
+            if p_depth == 0 and block_start >= 0:
+                blocks.append((block_start, idx + 7))
+                block_start = -1
+            pos = idx + 7
+        elif content[idx:idx + 5] == "<hp:p" and idx + 5 < n and content[idx + 5] in (' ', '>'):
+            p_depth += 1
+            if p_depth == 1:
+                block_start = idx
+            pos = idx + 5
+        else:
+            pos = idx + 1
+    return blocks
+
+
+def insert_after_anchor(content: str, anchor_text: str, new_xml: str, nth: int = 1) -> str:
+    """Insert new XML after the top-level <hp:p> containing anchor_text.
+
+    Uses depth-aware parsing to find the correct top-level </hp:p> closure,
+    even when anchor is inside nested structures (footer, subList, etc.).
     """
     anchor_pos = _find_anchor_outside_table(content, anchor_text, nth=nth)
     if anchor_pos == -1:
-        print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
+        print(f"WARNING: Anchor text '{anchor_text}' not found (outside nested contexts)", file=sys.stderr)
         return content
 
-    # Find the closing </hp:p> after the anchor
+    for start, end in _find_toplevel_p_blocks(content):
+        if start <= anchor_pos < end:
+            content = content[:end] + new_xml + content[end:]
+            print(f"  Inserted content after anchor '{anchor_text}'", file=sys.stderr)
+            return content
+
+    # Fallback: nearest </hp:p>
     close_pos = content.find("</hp:p>", anchor_pos)
     if close_pos == -1:
         print(f"WARNING: No closing </hp:p> found after anchor", file=sys.stderr)
         return content
-
     insert_pos = close_pos + len("</hp:p>")
     content = content[:insert_pos] + new_xml + content[insert_pos:]
-    print(f"  Inserted content after anchor '{anchor_text}'", file=sys.stderr)
+    print(f"  Inserted content after anchor '{anchor_text}' (fallback)", file=sys.stderr)
     return content
 
 
 def insert_before_anchor(content: str, anchor_text: str, new_xml: str, nth: int = 1) -> str:
-    """Insert new XML before the paragraph containing anchor_text.
-
-    Skips matches inside <hp:tbl> blocks.
-    """
+    """Insert new XML before the top-level <hp:p> containing anchor_text."""
     anchor_pos = _find_anchor_outside_table(content, anchor_text, nth=nth)
     if anchor_pos == -1:
-        print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
+        print(f"WARNING: Anchor text '{anchor_text}' not found (outside nested contexts)", file=sys.stderr)
         return content
 
-    # Find the opening <hp:p that contains this anchor
-    # Search backwards from anchor_pos for <hp:p
+    for start, end in _find_toplevel_p_blocks(content):
+        if start <= anchor_pos < end:
+            content = content[:start] + new_xml + content[start:]
+            print(f"  Inserted content before anchor '{anchor_text}'", file=sys.stderr)
+            return content
+
+    # Fallback: nearest <hp:p
     search_area = content[:anchor_pos]
     open_pos = search_area.rfind("<hp:p ")
     if open_pos == -1:
         print(f"WARNING: No opening <hp:p> found before anchor", file=sys.stderr)
         return content
-
     content = content[:open_pos] + new_xml + content[open_pos:]
-    print(f"  Inserted content before anchor '{anchor_text}'", file=sys.stderr)
+    print(f"  Inserted content before anchor '{anchor_text}' (fallback)", file=sys.stderr)
     return content
 
 
@@ -355,6 +398,10 @@ def main() -> None:
         "--after-nth", type=int, default=1, metavar="N",
         help="Use Nth match of anchor (1-based, default=1)",
     )
+    parser.add_argument(
+        "--bulk-insert", type=Path, metavar="JSON_FILE",
+        help='JSON with {"insert_after": "anchor", "paragraphs": [...]}',
+    )
     args = parser.parse_args()
 
     content = read_section(args.unpacked_dir)
@@ -386,6 +433,38 @@ def main() -> None:
     # 3. Replace drawText title
     if args.replace_title:
         content = replace_drawtext_title(content, args.replace_title)
+
+    # 3.5. Bulk insert sections from JSON (one-shot, avoids anchor collision)
+    if args.bulk_insert:
+        bulk = json.loads(args.bulk_insert.read_text(encoding="utf-8"))
+        b_anchor = bulk.get("insert_after", "")
+        paras = bulk.get("paragraphs", [])
+        new_xml = ""
+        for p in paras:
+            pt = p.get("type", "text")
+            txt = p.get("text", "")
+            if pt == "section_title":
+                new_xml += make_section_title(txt)
+            elif pt == "body":
+                new_xml += make_body_paragraph(txt)
+            elif pt == "sub":
+                new_xml += make_sub_paragraph(txt)
+            elif pt == "note":
+                new_xml += make_note_paragraph(txt)
+            elif pt == "blank":
+                new_xml += make_blank_line()
+            else:
+                new_xml += make_paragraph_xml(
+                    txt,
+                    para_pr_id=p.get("paraPrIDRef", 0),
+                    char_pr_id=p.get("charPrIDRef", 0),
+                )
+        if b_anchor and new_xml:
+            content = insert_after_anchor(content, b_anchor, new_xml, nth=args.after_nth)
+            print(f"  Bulk-inserted {len(paras)} paragraph(s) after '{b_anchor}'", file=sys.stderr)
+        elif new_xml:
+            content = insert_before_closing_sec(content, new_xml)
+            print(f"  Bulk-inserted {len(paras)} paragraph(s) before </hs:sec>", file=sys.stderr)
 
     # 4. Insert paragraphs from JSON
     if args.paragraphs:
