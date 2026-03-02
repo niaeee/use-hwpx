@@ -202,30 +202,63 @@ def _is_inside_table(content: str, pos: int) -> bool:
     return open_count > close_count
 
 
-def _find_anchor_outside_table(content: str, anchor_text: str) -> int:
-    """Find anchor_text position that is NOT inside a <hp:tbl> block.
-
-    Returns the position, or -1 if not found outside any table.
-    """
+def _find_all_anchors_outside_table(content: str, anchor_text: str) -> list[int]:
+    """Find ALL positions of anchor_text that are NOT inside <hp:tbl> blocks."""
+    positions = []
     start = 0
     while True:
         pos = content.find(anchor_text, start)
         if pos == -1:
-            return -1
+            break
         if not _is_inside_table(content, pos):
-            return pos
-        # Skip this match and try the next one
+            positions.append(pos)
         start = pos + len(anchor_text)
+    return positions
 
 
-def insert_after_anchor(content: str, anchor_text: str, new_xml: str) -> str:
+def _find_anchor_outside_table(content: str, anchor_text: str, nth: int = 1) -> int:
+    """Find anchor_text position that is NOT inside a <hp:tbl> block.
+
+    Args:
+        content: XML content string
+        anchor_text: Text to search for
+        nth: Which match to return (1-based, default=1)
+
+    Returns the position, or -1 if not found outside any table.
+    Prints a warning if multiple matches exist and nth=1.
+    """
+    positions = _find_all_anchors_outside_table(content, anchor_text)
+    if not positions:
+        return -1
+
+    if len(positions) > 1 and nth == 1:
+        print(
+            f"  WARNING: Anchor '{anchor_text}' has {len(positions)} matches outside tables. "
+            f"Using match #1. Use --after-nth N to select a specific match.",
+            file=sys.stderr,
+        )
+
+    if nth < 1 or nth > len(positions):
+        print(
+            f"  WARNING: --after-nth {nth} out of range (1~{len(positions)} available).",
+            file=sys.stderr,
+        )
+        return -1
+
+    return positions[nth - 1]
+
+
+def insert_after_anchor(content: str, anchor_text: str, new_xml: str, nth: int = 1) -> str:
     """Insert new XML after the paragraph containing anchor_text.
 
     Finds the <hp:p> element containing anchor_text and inserts new_xml
     after the closing </hp:p> tag. Skips matches inside <hp:tbl> blocks.
+
+    Args:
+        nth: Which match to use (1-based). Default=1 (first match).
     """
     # Find the anchor text position (outside tables)
-    anchor_pos = _find_anchor_outside_table(content, anchor_text)
+    anchor_pos = _find_anchor_outside_table(content, anchor_text, nth=nth)
     if anchor_pos == -1:
         print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
         return content
@@ -238,16 +271,20 @@ def insert_after_anchor(content: str, anchor_text: str, new_xml: str) -> str:
 
     insert_pos = close_pos + len("</hp:p>")
     content = content[:insert_pos] + new_xml + content[insert_pos:]
-    print(f"  Inserted content after anchor '{anchor_text}'", file=sys.stderr)
+    nth_str = f" (match #{nth})" if nth > 1 else ""
+    print(f"  Inserted content after anchor '{anchor_text}'{nth_str}", file=sys.stderr)
     return content
 
 
-def insert_before_anchor(content: str, anchor_text: str, new_xml: str) -> str:
+def insert_before_anchor(content: str, anchor_text: str, new_xml: str, nth: int = 1) -> str:
     """Insert new XML before the paragraph containing anchor_text.
 
     Skips matches inside <hp:tbl> blocks.
+
+    Args:
+        nth: Which match to use (1-based). Default=1 (first match).
     """
-    anchor_pos = _find_anchor_outside_table(content, anchor_text)
+    anchor_pos = _find_anchor_outside_table(content, anchor_text, nth=nth)
     if anchor_pos == -1:
         print(f"WARNING: Anchor text '{anchor_text}' not found (outside tables)", file=sys.stderr)
         return content
@@ -261,7 +298,8 @@ def insert_before_anchor(content: str, anchor_text: str, new_xml: str) -> str:
         return content
 
     content = content[:open_pos] + new_xml + content[open_pos:]
-    print(f"  Inserted content before anchor '{anchor_text}'", file=sys.stderr)
+    nth_str = f" (match #{nth})" if nth > 1 else ""
+    print(f"  Inserted content before anchor '{anchor_text}'{nth_str}", file=sys.stderr)
     return content
 
 
@@ -274,6 +312,45 @@ def insert_before_closing_sec(content: str, new_xml: str) -> str:
         return content
 
     content = content[:pos] + new_xml + content[pos:]
+    return content
+
+
+def replace_body_text(content: str, old_text: str, new_text: str, nth: int = 0) -> str:
+    """Replace text inside <hp:t> tags without deleting the paragraph.
+
+    Safe for paragraphs that contain nested footer/ctrl elements.
+    If nth=0, replaces ALL occurrences. If nth>=1, replaces only the Nth occurrence.
+    """
+    if nth == 0:
+        # Replace all occurrences
+        count = content.count(old_text)
+        if count == 0:
+            print(f"WARNING: Text '{old_text}' not found in section0.xml", file=sys.stderr)
+            return content
+        content = content.replace(old_text, new_text)
+        print(f"  Replaced '{old_text}' -> '{new_text}' ({count} occurrence(s))", file=sys.stderr)
+    else:
+        # Replace only the Nth occurrence
+        start = 0
+        found = 0
+        while True:
+            pos = content.find(old_text, start)
+            if pos == -1:
+                break
+            found += 1
+            if found == nth:
+                content = content[:pos] + new_text + content[pos + len(old_text):]
+                print(
+                    f"  Replaced '{old_text}' -> '{new_text}' (occurrence #{nth})",
+                    file=sys.stderr,
+                )
+                return content
+            start = pos + len(old_text)
+        print(
+            f"WARNING: Text '{old_text}' has only {found} occurrence(s), "
+            f"requested #{nth}",
+            file=sys.stderr,
+        )
     return content
 
 
@@ -336,6 +413,18 @@ def main() -> None:
         "--after", metavar="ANCHOR",
         help="Anchor for --add-section-title/--add-body/--add-sub/--add-note",
     )
+    parser.add_argument(
+        "--after-nth", type=int, default=1, metavar="N",
+        help="Use the Nth match of anchor text (1-based, default=1)",
+    )
+    parser.add_argument(
+        "--replace-body", nargs=2, metavar=("OLD", "NEW"),
+        help="Replace text inside <hp:t> without deleting paragraph (safe for footer-containing paragraphs)",
+    )
+    parser.add_argument(
+        "--nth", type=int, default=0, metavar="N",
+        help="For --replace-body: replace only the Nth occurrence (0=all, default=0)",
+    )
     args = parser.parse_args()
 
     content = read_section(args.unpacked_dir)
@@ -368,7 +457,13 @@ def main() -> None:
     if args.replace_title:
         content = replace_drawtext_title(content, args.replace_title)
 
+    # 3-1. Replace body text (safe — no paragraph deletion)
+    if args.replace_body:
+        old_text, new_text = args.replace_body
+        content = replace_body_text(content, old_text, new_text, nth=args.nth)
+
     # 4. Insert paragraphs from JSON
+    nth = args.after_nth
     if args.paragraphs:
         if not args.insert_after and not args.insert_before:
             raise SystemExit("ERROR: --paragraphs requires --insert-after or --insert-before")
@@ -395,37 +490,37 @@ def main() -> None:
                 )
 
         if args.insert_after:
-            content = insert_after_anchor(content, args.insert_after, new_xml)
+            content = insert_after_anchor(content, args.insert_after, new_xml, nth=nth)
         elif args.insert_before:
-            content = insert_before_anchor(content, args.insert_before, new_xml)
+            content = insert_before_anchor(content, args.insert_before, new_xml, nth=nth)
 
     # 5. Quick-add single paragraphs
     anchor = args.after
     if args.add_section_title:
         xml = make_section_title(args.add_section_title)
         if anchor:
-            content = insert_after_anchor(content, anchor, xml)
+            content = insert_after_anchor(content, anchor, xml, nth=nth)
         else:
             content = insert_before_closing_sec(content, xml)
 
     if args.add_body:
         xml = make_body_paragraph(args.add_body)
         if anchor:
-            content = insert_after_anchor(content, anchor, xml)
+            content = insert_after_anchor(content, anchor, xml, nth=nth)
         else:
             content = insert_before_closing_sec(content, xml)
 
     if args.add_sub:
         xml = make_sub_paragraph(args.add_sub)
         if anchor:
-            content = insert_after_anchor(content, anchor, xml)
+            content = insert_after_anchor(content, anchor, xml, nth=nth)
         else:
             content = insert_before_closing_sec(content, xml)
 
     if args.add_note:
         xml = make_note_paragraph(args.add_note)
         if anchor:
-            content = insert_after_anchor(content, anchor, xml)
+            content = insert_after_anchor(content, anchor, xml, nth=nth)
         else:
             content = insert_before_closing_sec(content, xml)
 
